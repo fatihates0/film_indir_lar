@@ -86,10 +86,12 @@ class DownloadService
 
         $start = 0;
         $end = $fileSize > 0 ? $fileSize - 1 : 0;
+        $isRangeRequest = false;
 
-        if ($rangeHeader && preg_match('/bytes=(\d+)-(\d*)?/', $rangeHeader, $matches)) {
+        if ($rangeHeader && preg_match('/bytes=(\d+)-(\d*)/', $rangeHeader, $matches)) {
+            $isRangeRequest = true;
             $start = (int) $matches[1];
-            if (! empty($matches[2])) {
+            if (isset($matches[2]) && $matches[2] !== '') {
                 $end = (int) $matches[2];
             }
         }
@@ -101,149 +103,91 @@ class DownloadService
         }
 
         $length = $fileSize > 0 ? max(0, ($end - $start) + 1) : 0;
-        $statusCode = $rangeHeader ? 206 : 200;
+        $statusCode = $isRangeRequest ? 206 : 200;
 
-        // Testing environment response handling for Pest/PHPUnit
-        if (app()->environment('testing')) {
-            $response = new StreamedResponse(function () use ($isLocalAvailable, $fullPath, $start, $length) {
-                if ($isLocalAvailable && $fullPath && file_exists($fullPath)) {
-                    $stream = fopen($fullPath, 'rb');
-                    if ($stream !== false) {
-                        fseek($stream, $start);
-                        echo fread($stream, $length);
-                        fclose($stream);
-                    }
-                }
-            }, $statusCode);
-            $response->headers->set('Content-Type', $media->mime_type ?: 'application/octet-stream');
-            $response->headers->set('Content-Disposition', 'attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name));
-            $response->headers->set('Accept-Ranges', 'bytes');
-            $response->headers->set('X-Accel-Buffering', 'no');
+        $safeFilename = str_replace(['"', "\r", "\n"], '', $media->file_name);
+        $encodedFilename = rawurlencode($media->file_name);
 
-            if ($fileSize > 0) {
-                $response->headers->set('Content-Length', (string) $length);
-                if ($rangeHeader) {
-                    $response->headers->set('Content-Range', "bytes {$start}-{$end}/{$fileSize}");
-                } else {
-                    $endPos = $fileSize - 1;
-                    $response->headers->set('Content-Range', "bytes 0-{$endPos}/{$fileSize}");
-                }
+        $headers = [
+            'Content-Type' => $media->mime_type ?: 'application/octet-stream',
+            'Content-Disposition' => "attachment; filename=\"{$safeFilename}\"; filename*=UTF-8''{$encodedFilename}",
+            'Accept-Ranges' => 'bytes',
+            'Cache-Control' => 'private, no-cache, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+        ];
+
+        if ($fileSize > 0) {
+            $headers['Content-Length'] = (string) $length;
+
+            if ($isRangeRequest) {
+                $headers['Content-Range'] = "bytes {$start}-{$end}/{$fileSize}";
             }
-
-            return $response;
         }
 
-        // Fast handling for HTTP HEAD requests (IDM link verification, batch clipboard link scanning)
+        // Fast, clean handling for HTTP HEAD requests (IDM link probing, clipboard scanner)
         if ($request->isMethod('HEAD')) {
-            if (ob_get_level()) {
-                ob_end_clean();
-            }
-
-            http_response_code($statusCode);
-
-            header('Content-Type: ' . ($media->mime_type ?: 'application/octet-stream'));
-            header('Content-Disposition: attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name));
-            header('Accept-Ranges: bytes');
-            header('X-Accel-Buffering: no');
-            header('Content-Encoding: identity');
-            header('Cache-Control: no-cache, private');
-
-            if ($fileSize > 0) {
-                header('Content-Length: ' . $length);
-
-                if ($rangeHeader) {
-                    header("Content-Range: bytes {$start}-{$end}/{$fileSize}");
-                } else {
-                    $endPos = $fileSize - 1;
-                    header("Content-Range: bytes 0-{$endPos}/{$fileSize}");
-                }
-            }
-
-            exit;
+            return response('', $statusCode, $headers);
         }
 
         // If Nginx X-Accel-Redirect is enabled in production config and file is local:
         if ($isLocalAvailable && config('downloads.use_x_accel', false)) {
             $protectedUrl = config('downloads.x_accel_prefix', '/protected-download/') . ltrim($media->file_path, '/');
 
-            return response('', 200, [
+            return response('', 200, array_merge($headers, [
                 'X-Accel-Redirect' => $protectedUrl,
-                'Content-Type' => $media->mime_type ?: 'application/octet-stream',
-                'Content-Disposition' => 'attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name),
-                'Accept-Ranges' => 'bytes',
-                'X-Accel-Buffering' => 'no',
-                'Content-Encoding' => 'identity',
-            ]);
+            ]));
         }
 
-        // Send raw PHP headers for GET streaming to guarantee Nginx, browser and IDM receive Content-Length, Content-Range & Accept-Ranges
-        if (ob_get_level()) {
-            ob_end_clean();
-        }
-
-        http_response_code($statusCode);
-
-        header('Content-Type: ' . ($media->mime_type ?: 'application/octet-stream'));
-        header('Content-Disposition: attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name));
-        header('Accept-Ranges: bytes');
-        header('X-Accel-Buffering: no');
-        header('Content-Encoding: identity');
-        header('Cache-Control: no-cache, private');
-
-        if ($fileSize > 0) {
-            header('Content-Length: ' . $length);
-
-            if ($rangeHeader) {
-                header("Content-Range: bytes {$start}-{$end}/{$fileSize}");
-            } else {
-                $endPos = $fileSize - 1;
-                header("Content-Range: bytes 0-{$endPos}/{$fileSize}");
-            }
-        }
-
-        if ($isLocalAvailable && $fullPath && file_exists($fullPath)) {
-            $stream = fopen($fullPath, 'rb');
-            if ($stream !== false) {
-                fseek($stream, $start);
-
-                $bufferSize = 1024 * 1024; // 1 MB buffer
-                $remaining = $length;
-
-                while (! feof($stream) && $remaining > 0 && connection_status() === 0) {
-                    $readLength = min($bufferSize, $remaining);
-                    $data = fread($stream, $readLength);
-                    echo $data;
-                    flush();
-                    $remaining -= strlen($data);
+        return new StreamedResponse(function () use ($isLocalAvailable, $fullPath, $remoteStreamUrl, $storageBox, $start, $length) {
+            if (! app()->environment('testing')) {
+                while (ob_get_level() > 0) {
+                    @ob_end_flush();
                 }
-
-                fclose($stream);
             }
-        } elseif ($remoteStreamUrl) {
-            $user = $storageBox->username;
-            $pass = $storageBox->password;
-            $endPos = $start + $length - 1;
 
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
-            curl_setopt($ch, CURLOPT_USERPWD, "{$user}:{$pass}");
-            curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            curl_setopt($ch, CURLOPT_RANGE, "{$start}-{$endPos}");
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
-            curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $chunk) {
-                echo $chunk;
-                flush();
-                return strlen($chunk);
-            });
-            curl_setopt($ch, CURLOPT_TIMEOUT, 0);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-            curl_exec($ch);
-            curl_close($ch);
-        }
+            if ($isLocalAvailable && $fullPath && file_exists($fullPath)) {
+                $stream = fopen($fullPath, 'rb');
+                if ($stream !== false) {
+                    fseek($stream, $start);
 
-        exit;
+                    $bufferSize = 256 * 1024; // 256 KB buffer
+                    $remaining = $length;
+
+                    while (! feof($stream) && $remaining > 0 && connection_status() === 0) {
+                        $readLength = min($bufferSize, $remaining);
+                        $data = fread($stream, $readLength);
+                        echo $data;
+                        flush();
+                        $remaining -= strlen($data);
+                    }
+
+                    fclose($stream);
+                }
+            } elseif ($remoteStreamUrl && $storageBox) {
+                $user = $storageBox->username;
+                $pass = $storageBox->password;
+                $endPos = $start + $length - 1;
+
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
+                curl_setopt($ch, CURLOPT_USERPWD, "{$user}:{$pass}");
+                curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+                curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+                curl_setopt($ch, CURLOPT_RANGE, "{$start}-{$endPos}");
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+                curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $chunk) {
+                    echo $chunk;
+                    flush();
+                    return strlen($chunk);
+                });
+                curl_setopt($ch, CURLOPT_TIMEOUT, 0);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                curl_exec($ch);
+                curl_close($ch);
+            }
+        }, $statusCode, $headers);
     }
 }
