@@ -436,10 +436,13 @@ class StorageBoxAdminController extends Controller
         $pass = $storageBox->password;
 
         $host = $storageBox->host;
+        $pathSegments = explode('/', trim(str_replace('\\', '/', $relativePath), '/'));
+        $cleanPath = implode('/', array_map('rawurlencode', array_filter($pathSegments, fn ($s) => $s !== '')));
+
         if (! str_starts_with($host, 'http://') && ! str_starts_with($host, 'https://')) {
-            $url = "https://{$host}/" . ltrim(str_replace('\\', '/', $relativePath), '/');
+            $url = "https://{$host}/" . ($cleanPath ? $cleanPath . '/' : '');
         } else {
-            $url = rtrim($host, '/') . '/' . ltrim(str_replace('\\', '/', $relativePath), '/');
+            $url = rtrim($host, '/') . '/' . ($cleanPath ? $cleanPath . '/' : '');
         }
 
         $url = rtrim($url, '/') . '/';

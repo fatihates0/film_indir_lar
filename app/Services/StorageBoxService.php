@@ -45,9 +45,20 @@ class StorageBoxService
      */
     public function isMounted(?StorageBox $storageBox = null): bool
     {
-        $path = $storageBox ? $storageBox->mount_path : $this->defaultMountPath;
+        if (! $storageBox) {
+            return file_exists($this->defaultMountPath) && is_readable($this->defaultMountPath);
+        }
 
-        return file_exists($path) && is_readable($path);
+        $path = $storageBox->mount_path;
+        if (! empty($path) && file_exists($path) && is_readable($path)) {
+            return true;
+        }
+
+        if (! empty($storageBox->host) && ! empty($storageBox->username)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -82,10 +93,13 @@ class StorageBoxService
         }
 
         $host = $storageBox->host;
+        $pathSegments = explode('/', trim(str_replace('\\', '/', $relativePath), '/'));
+        $cleanPath = implode('/', array_map('rawurlencode', array_filter($pathSegments, fn ($s) => $s !== '')));
+
         if (! str_starts_with($host, 'http://') && ! str_starts_with($host, 'https://')) {
-            $remoteStreamUrl = "https://{$host}/" . ltrim(str_replace('\\', '/', $relativePath), '/');
+            $remoteStreamUrl = "https://{$host}/" . $cleanPath;
         } else {
-            $remoteStreamUrl = rtrim($host, '/') . '/' . ltrim(str_replace('\\', '/', $relativePath), '/');
+            $remoteStreamUrl = rtrim($host, '/') . '/' . $cleanPath;
         }
 
         try {

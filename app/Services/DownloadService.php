@@ -46,10 +46,13 @@ class DownloadService
 
         if (! $isLocalAvailable && $storageBox && ! empty($storageBox->host) && ! empty($storageBox->username)) {
             $host = $storageBox->host;
+            $pathSegments = explode('/', trim(str_replace('\\', '/', $media->file_path), '/'));
+            $cleanPath = implode('/', array_map('rawurlencode', array_filter($pathSegments, fn ($s) => $s !== '')));
+
             if (! str_starts_with($host, 'http://') && ! str_starts_with($host, 'https://')) {
-                $remoteStreamUrl = "https://{$host}/" . ltrim(str_replace('\\', '/', $media->file_path), '/');
+                $remoteStreamUrl = "https://{$host}/" . $cleanPath;
             } else {
-                $remoteStreamUrl = rtrim($host, '/') . '/' . ltrim(str_replace('\\', '/', $media->file_path), '/');
+                $remoteStreamUrl = rtrim($host, '/') . '/' . $cleanPath;
             }
         }
 

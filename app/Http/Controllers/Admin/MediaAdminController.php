@@ -31,14 +31,22 @@ class MediaAdminController extends Controller
 
         $storageBoxes = StorageBox::where('is_active', true)
             ->get()
-            ->map(fn ($box) => [
-                'id' => $box->id,
-                'name' => $box->name,
-                'host' => $box->host,
-                'mount_path' => $box->mount_path,
-                'disk_type' => $box->disk_type,
-                'status' => $box->status,
-            ]);
+            ->map(function ($box) {
+                $isOnline = $this->storageBoxService->isMounted($box);
+                $status = $isOnline ? 'online' : 'offline';
+                if ($box->status !== $status) {
+                    $box->update(['status' => $status]);
+                }
+
+                return [
+                    'id' => $box->id,
+                    'name' => $box->name,
+                    'host' => $box->host,
+                    'mount_path' => $box->mount_path,
+                    'disk_type' => $box->disk_type,
+                    'status' => $status,
+                ];
+            });
 
         return Inertia::render('Admin/Media/Index', [
             'media' => $media,
