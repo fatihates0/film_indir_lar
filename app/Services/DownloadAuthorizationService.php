@@ -39,6 +39,15 @@ class DownloadAuthorizationService
             throw new InvalidArgumentException('Medya dosyası depolama alanında bulunamadı.');
         }
 
+        // Ensure media file_size is populated before creating download session
+        if ($media->file_size <= 0 && $media->storageBox) {
+            $remoteSize = $this->storageBoxService->fetchRemoteFileSize($media->file_path, $media->storageBox);
+            if ($remoteSize > 0) {
+                $media->update(['file_size' => $remoteSize]);
+                $media->refresh();
+            }
+        }
+
         // Reuse existing active session for the SAME media if still valid (IDM & multi-connection support)
         $existingSession = DownloadSession::where('user_id', $user->id)
             ->where('media_id', $media->id)
@@ -47,6 +56,10 @@ class DownloadAuthorizationService
             ->first();
 
         if ($existingSession) {
+            if ($existingSession->file_size <= 0 && $media->file_size > 0) {
+                $existingSession->update(['file_size' => $media->file_size]);
+            }
+
             $downloadUrl = URL::temporarySignedRoute(
                 'download.stream',
                 $existingSession->expires_at,
