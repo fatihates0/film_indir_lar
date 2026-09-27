@@ -63,7 +63,7 @@ class StorageBoxAdminController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'mount_path' => ['required', 'string', 'max:500'],
-            'disk_type' => ['required', 'string', 'in:cifs,sshfs,sftp,webdav,local'],
+            'disk_type' => ['required', 'string', 'in:cifs,sshfs,local'],
             'host' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:500'],
@@ -92,7 +92,7 @@ class StorageBoxAdminController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'mount_path' => ['required', 'string', 'max:500'],
-            'disk_type' => ['required', 'string', 'in:cifs,sshfs,sftp,webdav,local'],
+            'disk_type' => ['required', 'string', 'in:cifs,sshfs,local'],
             'host' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:500'],
@@ -280,26 +280,12 @@ class StorageBoxAdminController extends Controller
                 // Local path error fallback to WebDAV/FTP
             }
 
-            // Fallback: Connect directly to Hetzner Storage Box via SFTP/WebDAV/FTP
+            // Fallback: Connect directly to Hetzner Storage Box via WebDAV first (fastest HTTPS), then FTP
             if (count($directories) === 0 && count($files) === 0 && ! empty($storageBox->host) && ! empty($storageBox->username)) {
-                $remoteResult = null;
-
-                if ($storageBox->disk_type === 'sftp') {
-                    $remoteResult = $this->browseRemoteSftp($storageBox, $relativePath);
-                }
-
-                if (! $remoteResult) {
-                    $remoteResult = $this->browseRemoteWebdav($storageBox, $relativePath);
-                }
-
-                if (! $remoteResult) {
-                    $remoteResult = $this->browseRemoteSftp($storageBox, $relativePath);
-                }
-
+                $remoteResult = $this->browseRemoteWebdav($storageBox, $relativePath);
                 if (! $remoteResult) {
                     $remoteResult = $this->browseRemoteFtp($storageBox, $relativePath);
                 }
-
                 if ($remoteResult) {
                     return $remoteResult;
                 }
@@ -570,87 +556,5 @@ class StorageBoxAdminController extends Controller
             'directories' => $directories,
             'files' => $files,
         ];
-    }
-
-    protected function browseRemoteSftp(StorageBox $storageBox, string $relativePath = ''): ?array
-    {
-        if (empty($storageBox->host) || empty($storageBox->username) || empty($storageBox->password)) {
-            return null;
-        }
-
-        try {
-            $port = $storageBox->port ?: 22;
-            $sftp = new \phpseclib3\Net\SFTP($storageBox->host, $port, 5);
-            if (! $sftp->login($storageBox->username, $storageBox->password)) {
-                return null;
-            }
-
-            $targetPath = '/' . trim(str_replace('\\', '/', $relativePath), '/');
-            $rawItems = $sftp->rawlist($targetPath === '/' ? '.' : $targetPath);
-
-            if ($rawItems === false || ! is_array($rawItems)) {
-                return null;
-            }
-
-            $directories = [];
-            $files = [];
-            $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov'];
-
-            $existingMediaPaths = Media::where('storage_box_id', $storageBox->id)
-                ->pluck('id', 'file_path')
-                ->toArray();
-
-            foreach ($rawItems as $name => $info) {
-                if ($name === '.' || $name === '..' || Str::startsWith($name, ['$Recycle', '$RECYCLE', 'System Volume Information', '.Trash', '.git'])) {
-                    continue;
-                }
-
-                $itemRelativePath = $relativePath ? "{$relativePath}/{$name}" : $name;
-                $isDir = isset($info['type']) && $info['type'] === \phpseclib3\Net\SFTP::TYPE_DIRECTORY;
-                $sizeBytes = (int) ($info['size'] ?? 0);
-
-                if ($isDir) {
-                    $directories[] = [
-                        'name' => $name,
-                        'relative_path' => $itemRelativePath,
-                    ];
-                } else {
-                    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-                    if (in_array($ext, $videoExtensions)) {
-                        $files[] = [
-                            'name' => $name,
-                            'relative_path' => $itemRelativePath,
-                            'extension' => $ext,
-                            'size_bytes' => $sizeBytes,
-                            'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2) . ' GB',
-                            'is_added' => isset($existingMediaPaths[$itemRelativePath]),
-                            'media_id' => $existingMediaPaths[$itemRelativePath] ?? null,
-                        ];
-                    }
-                }
-            }
-
-            $parentPath = '';
-            if ($relativePath !== '') {
-                $parts = explode('/', $relativePath);
-                array_pop($parts);
-                $parentPath = implode('/', $parts);
-            }
-
-            return [
-                'status' => 'success',
-                'storage_box' => [
-                    'id' => $storageBox->id,
-                    'name' => $storageBox->name,
-                    'mount_path' => $storageBox->mount_path,
-                ],
-                'current_path' => $relativePath,
-                'parent_path' => $parentPath,
-                'directories' => $directories,
-                'files' => $files,
-            ];
-        } catch (\Exception $e) {
-            return null;
-        }
     }
 }

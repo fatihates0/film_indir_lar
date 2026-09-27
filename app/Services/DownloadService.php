@@ -173,8 +173,8 @@ class DownloadService
         }
 
         // Fallback to PHP StreamedResponse supporting 206 Partial Content / HTTP Range for IDM
-        $response = new StreamedResponse(function () use ($fullPath, $remoteStreamUrl, $storageBox, $media, $start, $length, $isLocalAvailable) {
-            if ($isLocalAvailable && $fullPath && file_exists($fullPath)) {
+        $response = new StreamedResponse(function () use ($fullPath, $remoteStreamUrl, $storageBox, $start, $length) {
+            if ($fullPath && file_exists($fullPath)) {
                 $stream = fopen($fullPath, 'rb');
                 if ($stream === false) {
                     return;
@@ -194,20 +194,6 @@ class DownloadService
                 }
 
                 fclose($stream);
-            } elseif ($storageBox && $storageBox->disk_type === 'sftp' && ! empty($storageBox->password)) {
-                try {
-                    $port = $storageBox->port ?: 22;
-                    $sftp = new \phpseclib3\Net\SFTP($storageBox->host, $port, 0);
-                    if ($sftp->login($storageBox->username, $storageBox->password)) {
-                        $remotePath = '/' . trim(str_replace('\\', '/', $media->file_path), '/');
-                        $sftp->get($remotePath, function ($chunk) {
-                            echo $chunk;
-                            flush();
-                        }, $start, $length);
-                    }
-                } catch (\Exception $e) {
-                    Log::error('SFTP streaming error: ' . $e->getMessage());
-                }
             } elseif ($remoteStreamUrl) {
                 $user = $storageBox->username;
                 $pass = $storageBox->password;

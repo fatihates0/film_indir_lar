@@ -305,9 +305,7 @@ export default function StorageBoxesIndex({ boxes }) {
                                             onChange={(e) => boxForm.setData('disk_type', e.target.value)}
                                             className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-indigo-500 focus:ring-indigo-500 text-xs"
                                         >
-                                            <option value="webdav">WebDAV (HTTPS - Port 443)</option>
-                                            <option value="sftp">SFTP (SSH - Port 22)</option>
-                                            <option value="cifs">CIFS / SMB</option>
+                                            <option value="cifs">CIFS / SMB (Önerilen)</option>
                                             <option value="sshfs">SSHFS</option>
                                             <option value="local">Local Directory</option>
                                         </select>
@@ -402,31 +400,15 @@ export default function StorageBoxesIndex({ boxes }) {
                                     />
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Bağlantı Türü</label>
-                                        <select
-                                            value={editForm.data.disk_type}
-                                            onChange={(e) => editForm.setData('disk_type', e.target.value)}
-                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                        >
-                                            <option value="webdav">WebDAV (HTTPS - Port 443)</option>
-                                            <option value="sftp">SFTP (SSH - Port 22)</option>
-                                            <option value="cifs">CIFS / SMB</option>
-                                            <option value="sshfs">SSHFS</option>
-                                            <option value="local">Local Directory</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Mount Dizini</label>
-                                        <input
-                                            type="text"
-                                            value={editForm.data.mount_path}
-                                            onChange={(e) => editForm.setData('mount_path', e.target.value)}
-                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono text-xs"
-                                            required
-                                        />
-                                    </div>
+                                <div>
+                                    <label className="block font-semibold text-slate-300 mb-1">Mount Dizini</label>
+                                    <input
+                                        type="text"
+                                        value={editForm.data.mount_path}
+                                        onChange={(e) => editForm.setData('mount_path', e.target.value)}
+                                        className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono text-xs"
+                                        required
+                                    />
                                 </div>
 
                                 <div className="pt-4 border-t border-slate-800 flex gap-2">
