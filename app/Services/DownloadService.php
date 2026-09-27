@@ -97,6 +97,8 @@ class DownloadService
 
             if ($fileSize > 0) {
                 $response->headers->set('Content-Length', (string) $fileSize);
+                $endPos = $fileSize - 1;
+                $response->headers->set('Content-Range', "bytes 0-{$endPos}/{$fileSize}");
             }
 
             return $response;
@@ -217,6 +219,8 @@ class DownloadService
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
                 curl_setopt($ch, CURLOPT_USERPWD, "{$user}:{$pass}");
+                curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+                curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
                 curl_setopt($ch, CURLOPT_RANGE, "{$start}-{$endPos}");
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
@@ -240,10 +244,13 @@ class DownloadService
 
         if ($fileSize > 0) {
             $response->headers->set('Content-Length', (string) $length);
-        }
 
-        if ($rangeHeader && $fileSize > 0) {
-            $response->headers->set('Content-Range', "bytes {$start}-{$end}/{$fileSize}");
+            if ($rangeHeader) {
+                $response->headers->set('Content-Range', "bytes {$start}-{$end}/{$fileSize}");
+            } else {
+                $endPos = $fileSize - 1;
+                $response->headers->set('Content-Range', "bytes 0-{$endPos}/{$fileSize}");
+            }
         }
 
         return $response;
