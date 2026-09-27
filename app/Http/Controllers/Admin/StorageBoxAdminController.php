@@ -11,6 +11,7 @@ use App\Services\MediaScannerService;
 use App\Services\StorageBoxService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -225,84 +226,93 @@ class StorageBoxAdminController extends Controller
     public function browse(StorageBox $storageBox, Request $request)
     {
         $relativePath = trim($request->query('path', ''), '/\\');
+        $cacheKey = "storage_box_browse_{$storageBox->id}_" . md5($relativePath);
 
-        $directories = [];
-        $files = [];
+        if ($request->boolean('refresh')) {
+            Cache::forget($cacheKey);
+        }
 
-        try {
-            $fullPath = $this->storageBoxService->resolveRealPath($relativePath, $storageBox);
-            if (file_exists($fullPath) && is_dir($fullPath)) {
-                $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov'];
+        $data = Cache::remember($cacheKey, 30, function () use ($storageBox, $relativePath) {
+            $directories = [];
+            $files = [];
 
-                $existingMediaPaths = Media::where('storage_box_id', $storageBox->id)
-                    ->pluck('id', 'file_path')
-                    ->toArray();
+            try {
+                $fullPath = $this->storageBoxService->resolveRealPath($relativePath, $storageBox);
+                if (file_exists($fullPath) && is_dir($fullPath)) {
+                    $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov'];
 
-                $items = scandir($fullPath);
-                foreach ($items as $item) {
-                    if ($item === '.' || $item === '..' || Str::startsWith($item, ['$Recycle', '$RECYCLE', 'System Volume Information', '.Trash', '.git'])) {
-                        continue;
-                    }
+                    $existingMediaPaths = Media::where('storage_box_id', $storageBox->id)
+                        ->pluck('id', 'file_path')
+                        ->toArray();
 
-                    $itemFullPath = $fullPath . DIRECTORY_SEPARATOR . $item;
-                    $itemRelativePath = $relativePath ? "{$relativePath}/{$item}" : $item;
+                    $items = scandir($fullPath);
+                    foreach ($items as $item) {
+                        if ($item === '.' || $item === '..' || Str::startsWith($item, ['$Recycle', '$RECYCLE', 'System Volume Information', '.Trash', '.git'])) {
+                            continue;
+                        }
 
-                    if (is_dir($itemFullPath)) {
-                        $directories[] = [
-                            'name' => $item,
-                            'relative_path' => $itemRelativePath,
-                        ];
-                    } elseif (is_file($itemFullPath)) {
-                        $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
-                        if (in_array($ext, $videoExtensions)) {
-                            $sizeBytes = filesize($itemFullPath);
-                            $files[] = [
+                        $itemFullPath = $fullPath . DIRECTORY_SEPARATOR . $item;
+                        $itemRelativePath = $relativePath ? "{$relativePath}/{$item}" : $item;
+
+                        if (is_dir($itemFullPath)) {
+                            $directories[] = [
                                 'name' => $item,
                                 'relative_path' => $itemRelativePath,
-                                'extension' => $ext,
-                                'size_bytes' => $sizeBytes,
-                                'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2) . ' GB',
-                                'is_added' => isset($existingMediaPaths[$itemRelativePath]),
-                                'media_id' => $existingMediaPaths[$itemRelativePath] ?? null,
                             ];
+                        } elseif (is_file($itemFullPath)) {
+                            $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
+                            if (in_array($ext, $videoExtensions)) {
+                                $sizeBytes = filesize($itemFullPath);
+                                $files[] = [
+                                    'name' => $item,
+                                    'relative_path' => $itemRelativePath,
+                                    'extension' => $ext,
+                                    'size_bytes' => $sizeBytes,
+                                    'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2) . ' GB',
+                                    'is_added' => isset($existingMediaPaths[$itemRelativePath]),
+                                    'media_id' => $existingMediaPaths[$itemRelativePath] ?? null,
+                                ];
+                            }
                         }
                     }
                 }
+            } catch (\Exception $e) {
+                // Local path error fallback to WebDAV/FTP
             }
-        } catch (\Exception $e) {
-            // Local path error fallback to FTP
-        }
 
-        // Fallback: If local mount yields no files or is unmounted, connect directly to Hetzner Storage Box via FTP or WebDAV!
-        if (count($directories) === 0 && count($files) === 0 && ! empty($storageBox->host) && ! empty($storageBox->username)) {
-            $remoteResult = $this->browseRemoteFtp($storageBox, $relativePath);
-            if (! $remoteResult) {
+            // Fallback: Connect directly to Hetzner Storage Box via WebDAV first (fastest HTTPS), then FTP
+            if (count($directories) === 0 && count($files) === 0 && ! empty($storageBox->host) && ! empty($storageBox->username)) {
                 $remoteResult = $this->browseRemoteWebdav($storageBox, $relativePath);
+                if (! $remoteResult) {
+                    $remoteResult = $this->browseRemoteFtp($storageBox, $relativePath);
+                }
+                if ($remoteResult) {
+                    return $remoteResult;
+                }
             }
-            if ($remoteResult) {
-                return response()->json($remoteResult);
+
+            $parentPath = '';
+            if ($relativePath !== '') {
+                $parts = explode('/', $relativePath);
+                array_pop($parts);
+                $parentPath = implode('/', $parts);
             }
-        }
 
-        $parentPath = '';
-        if ($relativePath !== '') {
-            $parts = explode('/', $relativePath);
-            array_pop($parts);
-            $parentPath = implode('/', $parts);
-        }
+            return [
+                'status' => 'success',
+                'storage_box' => [
+                    'id' => $storageBox->id,
+                    'name' => $storageBox->name,
+                    'mount_path' => $storageBox->mount_path,
+                ],
+                'current_path' => $relativePath,
+                'parent_path' => $parentPath,
+                'directories' => $directories,
+                'files' => $files,
+            ];
+        });
 
-        return response()->json([
-            'status' => 'success',
-            'storage_box' => [
-                'id' => $storageBox->id,
-                'name' => $storageBox->name,
-                'mount_path' => $storageBox->mount_path,
-            ],
-            'current_path' => $relativePath,
-            'parent_path' => $parentPath,
-            'directories' => $directories,
-            'files' => $files,
-        ]);
+        return response()->json($data);
     }
 
     protected function browseRemoteFtp(StorageBox $storageBox, string $relativePath = ''): ?array
@@ -320,9 +330,9 @@ class StorageBoxAdminController extends Controller
         $user = $storageBox->username;
         $pass = $storageBox->password;
 
-        $conn = @\ftp_connect($host, $port, 10);
+        $conn = @\ftp_connect($host, $port, 2);
         if (! $conn && \function_exists('ftp_ssl_connect')) {
-            $conn = @\ftp_ssl_connect($host, $port, 10);
+            $conn = @\ftp_ssl_connect($host, $port, 2);
         }
 
         if (! $conn) {
