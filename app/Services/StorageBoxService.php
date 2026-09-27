@@ -84,7 +84,7 @@ class StorageBoxService
     }
 
     /**
-     * Fetch remote file size from Hetzner Storage Box via HTTP Range/HEAD request.
+     * Fetch remote file size from Hetzner Storage Box via WebDAV PROPFIND / HTTP Range request.
      */
     public function fetchRemoteFileSize(string $relativePath, ?StorageBox $storageBox = null): int
     {
@@ -103,6 +103,27 @@ class StorageBoxService
         }
 
         try {
+            // Method 1: WebDAV PROPFIND (100% reliable for Hetzner Storage Box)
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
+            curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PROPFIND');
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Depth: 0',
+                'Content-Type: application/xml; charset=utf-8',
+            ]);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+            $xmlResponse = curl_exec($ch);
+            curl_close($ch);
+
+            if ($xmlResponse && preg_match('/<[^:]*:?getcontentlength[^>]*>(\d+)<\//i', $xmlResponse, $matches)) {
+                return (int) $matches[1];
+            }
+
+            // Method 2: HTTP Range 0-0 request
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
             curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
@@ -112,16 +133,30 @@ class StorageBoxService
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
             $headers = curl_exec($ch);
             curl_close($ch);
 
-            if ($headers && preg_match('/Content-Range:\s*bytes\s+\d+-\d+\/(\d+)/i', $headers, $matches)) {
-                return (int) $matches[1];
-            }
+            if ($headers) {
+                $headerBlocks = explode("\r\n\r\n", $headers);
+                $lastHeaderBlock = '';
+                foreach (array_reverse($headerBlocks) as $block) {
+                    if (preg_match('/HTTP\/\d/i', $block)) {
+                        $lastHeaderBlock = $block;
+                        break;
+                    }
+                }
 
-            if ($headers && preg_match('/Content-Length:\s*(\d+)/i', $headers, $matches)) {
-                return (int) $matches[1];
+                if (preg_match('/Content-Range:\s*bytes\s+\d+-\d+\/(\d+)/i', $lastHeaderBlock, $matches)) {
+                    return (int) $matches[1];
+                }
+
+                if (preg_match('/Content-Length:\s*(\d+)/i', $lastHeaderBlock, $matches)) {
+                    $len = (int) $matches[1];
+                    if ($len > 1) {
+                        return $len;
+                    }
+                }
             }
         } catch (Exception $e) {
             Log::warning('Failed to fetch remote file size: ' . $e->getMessage());
