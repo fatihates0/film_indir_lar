@@ -116,6 +116,16 @@ class MediaScannerService
                     $existing->update(['file_path' => $relativePath]);
                 }
 
+                if ($fileSize <= 0 && $existing && $existing->file_size > 0) {
+                    $fileSize = $existing->file_size;
+                }
+                if ($fileSize <= 0 && $storageBox) {
+                    $remoteSize = $this->storageBoxService->fetchRemoteFileSize($relativePath, $storageBox);
+                    if ($remoteSize > 0) {
+                        $fileSize = $remoteSize;
+                    }
+                }
+
                 if (! $existing) {
                     // Generate guaranteed unique slug
                     $slug = Media::generateUniqueSlug($title, $year);
@@ -150,10 +160,11 @@ class MediaScannerService
                     ]);
                     $added++;
                 } else {
-                    // Update if size changed or marked unavailable
-                    if ($existing->file_size !== $fileSize || ! $existing->is_available) {
+                    // Update if size changed (to a valid positive size) or marked unavailable
+                    $shouldUpdateSize = ($fileSize > 0 && $existing->file_size !== $fileSize);
+                    if ($shouldUpdateSize || ! $existing->is_available) {
                         $existing->update([
-                            'file_size' => $fileSize,
+                            'file_size' => $fileSize > 0 ? $fileSize : $existing->file_size,
                             'is_available' => true,
                             'storage_box_id' => $storageBox?->id ?? $existing->storage_box_id,
                         ]);

@@ -191,7 +191,15 @@ class StorageBoxAdminController extends Controller
             }
         }
 
-        $actualSize = file_exists($fullPath) ? filesize($fullPath) : $sizeBytes;
+        $localSize = (file_exists($fullPath) && is_file($fullPath)) ? filesize($fullPath) : 0;
+        $actualSize = $localSize > 0 ? $localSize : $sizeBytes;
+
+        if ($actualSize <= 0 && $storageBox) {
+            $remoteSize = $this->storageBoxService->fetchRemoteFileSize($relativePath, $storageBox);
+            if ($remoteSize > 0) {
+                $actualSize = $remoteSize;
+            }
+        }
 
         $media = Media::create([
             'storage_box_id' => $storageBox->id,

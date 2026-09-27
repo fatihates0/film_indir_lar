@@ -41,7 +41,7 @@ class DownloadService
             // Local path resolution error fallback
         }
 
-        $isLocalAvailable = $fullPath && file_exists($fullPath);
+        $isLocalAvailable = $fullPath && file_exists($fullPath) && is_file($fullPath) && filesize($fullPath) > 0;
         $remoteStreamUrl = null;
 
         if (! $isLocalAvailable && $storageBox && ! empty($storageBox->host) && ! empty($storageBox->username)) {
@@ -60,14 +60,29 @@ class DownloadService
             abort(404, 'İstenen medya dosyası depolama alanında bulunamadı.');
         }
 
-        $fileSize = $isLocalAvailable ? filesize($fullPath) : ($media->file_size ?: 0);
+        $fileSize = 0;
+        if ($isLocalAvailable) {
+            $fileSize = filesize($fullPath);
+        } elseif ($media->file_size > 0) {
+            $fileSize = (int) $media->file_size;
+        } elseif ($session->file_size > 0) {
+            $fileSize = (int) $session->file_size;
+        }
 
         if ($fileSize <= 0 && $storageBox) {
             $remoteSize = $this->storageBoxService->fetchRemoteFileSize($media->file_path, $storageBox);
 
             if ($remoteSize > 0) {
                 $fileSize = $remoteSize;
+            }
+        }
+
+        if ($fileSize > 0) {
+            if ($media->file_size != $fileSize) {
                 $media->update(['file_size' => $fileSize]);
+            }
+            if ($session->file_size != $fileSize) {
+                $session->update(['file_size' => $fileSize]);
             }
         }
 

@@ -103,12 +103,15 @@ class StorageBoxService
         }
 
         try {
-            // Method 1: WebDAV PROPFIND (100% reliable for Hetzner Storage Box)
+            // Method 1: WebDAV PROPFIND (100% reliable for Hetzner Storage Box WebDAV)
+            $xmlRequestBody = '<?xml version="1.0" encoding="utf-8" ?><D:propfind xmlns:D="DAV:"><D:prop><D:getcontentlength/></D:prop></D:propfind>';
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
             curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PROPFIND');
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $xmlRequestBody);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Depth: 0',
                 'Content-Type: application/xml; charset=utf-8',
@@ -156,6 +159,27 @@ class StorageBoxService
                     if ($len > 1) {
                         return $len;
                     }
+                }
+            }
+
+            // Method 3: HTTP HEAD request
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
+            curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
+            curl_setopt($ch, CURLOPT_NOBODY, true);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HEADER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+            $headResponse = curl_exec($ch);
+            curl_close($ch);
+
+            if ($headResponse && preg_match('/Content-Length:\s*(\d+)/i', $headResponse, $matches)) {
+                $len = (int) $matches[1];
+                if ($len > 0) {
+                    return $len;
                 }
             }
         } catch (Exception $e) {
