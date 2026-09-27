@@ -149,6 +149,7 @@ class DownloadService
             header('Content-Disposition: attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name));
             header('Accept-Ranges: bytes');
             header('X-Accel-Buffering: no');
+            header('Content-Encoding: identity');
             header('Cache-Control: no-cache, private');
 
             if ($fileSize > 0) {
@@ -175,10 +176,11 @@ class DownloadService
                 'Content-Disposition' => 'attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name),
                 'Accept-Ranges' => 'bytes',
                 'X-Accel-Buffering' => 'no',
+                'Content-Encoding' => 'identity',
             ]);
         }
 
-        // Send raw PHP headers for GET streaming to guarantee Nginx and IDM receive Content-Length, Content-Range & Accept-Ranges
+        // Send raw PHP headers for GET streaming to guarantee Nginx, browser and IDM receive Content-Length, Content-Range & Accept-Ranges
         if (ob_get_level()) {
             ob_end_clean();
         }
@@ -189,6 +191,7 @@ class DownloadService
         header('Content-Disposition: attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name));
         header('Accept-Ranges: bytes');
         header('X-Accel-Buffering: no');
+        header('Content-Encoding: identity');
         header('Cache-Control: no-cache, private');
 
         if ($fileSize > 0) {
