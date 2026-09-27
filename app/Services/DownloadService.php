@@ -59,19 +59,8 @@ class DownloadService
 
         $fileSize = $isLocalAvailable ? filesize($fullPath) : ($media->file_size ?: 0);
 
-        if ($fileSize <= 0 && $remoteStreamUrl) {
-            $chSize = curl_init();
-            curl_setopt($chSize, CURLOPT_URL, $remoteStreamUrl);
-            curl_setopt($chSize, CURLOPT_NOBODY, true);
-            curl_setopt($chSize, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
-            curl_setopt($chSize, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($chSize, CURLOPT_HEADER, true);
-            curl_setopt($chSize, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($chSize, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($chSize, CURLOPT_SSL_VERIFYHOST, false);
-            curl_exec($chSize);
-            $remoteSize = (int) curl_getinfo($chSize, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
-            curl_close($chSize);
+        if ($fileSize <= 0 && $storageBox) {
+            $remoteSize = $this->storageBoxService->fetchRemoteFileSize($media->file_path, $storageBox);
 
             if ($remoteSize > 0) {
                 $fileSize = $remoteSize;
@@ -82,7 +71,7 @@ class DownloadService
         $rangeHeader = $request->header('Range');
 
         $start = 0;
-        $end = max(0, $fileSize - 1);
+        $end = $fileSize > 0 ? $fileSize - 1 : 0;
 
         if ($rangeHeader && preg_match('/bytes=(\d+)-(\d*)?/', $rangeHeader, $matches)) {
             $start = (int) $matches[1];
@@ -97,7 +86,7 @@ class DownloadService
             ]);
         }
 
-        $length = ($end - $start) + 1;
+        $length = $fileSize > 0 ? max(0, ($end - $start) + 1) : 0;
 
         // Verify quota can handle this chunk
         if (! $this->quotaService->canConsume($user, $length)) {
@@ -149,8 +138,9 @@ class DownloadService
             return response('', 200, [
                 'X-Accel-Redirect' => $protectedUrl,
                 'Content-Type' => $media->mime_type ?: 'application/octet-stream',
-                'Content-Disposition' => 'attachment; filename="' . rawurlencode($media->file_name) . '"',
+                'Content-Disposition' => 'attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name),
                 'Accept-Ranges' => 'bytes',
+                'X-Accel-Buffering' => 'no',
             ]);
         }
 
@@ -201,8 +191,10 @@ class DownloadService
         }, $rangeHeader ? 206 : 200);
 
         $response->headers->set('Content-Type', $media->mime_type ?: 'application/octet-stream');
-        $response->headers->set('Content-Disposition', 'attachment; filename="' . rawurlencode($media->file_name) . '"');
+        $response->headers->set('Content-Disposition', 'attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name));
         $response->headers->set('Accept-Ranges', 'bytes');
+        $response->headers->set('X-Accel-Buffering', 'no');
+
         if ($fileSize > 0) {
             $response->headers->set('Content-Length', (string) $length);
         }

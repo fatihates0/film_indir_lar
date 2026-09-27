@@ -73,13 +73,81 @@ class StorageBoxService
     }
 
     /**
-     * Extract metadata using ffprobe if installed, or fallback to native PHP file info.
+     * Fetch remote file size from Hetzner Storage Box via HTTP Range/HEAD request.
+     */
+    public function fetchRemoteFileSize(string $relativePath, ?StorageBox $storageBox = null): int
+    {
+        if (! $storageBox || empty($storageBox->host) || empty($storageBox->username)) {
+            return 0;
+        }
+
+        $host = $storageBox->host;
+        if (! str_starts_with($host, 'http://') && ! str_starts_with($host, 'https://')) {
+            $remoteStreamUrl = "https://{$host}/" . ltrim(str_replace('\\', '/', $relativePath), '/');
+        } else {
+            $remoteStreamUrl = rtrim($host, '/') . '/' . ltrim(str_replace('\\', '/', $relativePath), '/');
+        }
+
+        try {
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
+            curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
+            curl_setopt($ch, CURLOPT_RANGE, "0-0");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HEADER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            $headers = curl_exec($ch);
+            curl_close($ch);
+
+            if ($headers && preg_match('/Content-Range:\s*bytes\s+\d+-\d+\/(\d+)/i', $headers, $matches)) {
+                return (int) $matches[1];
+            }
+
+            if ($headers && preg_match('/Content-Length:\s*(\d+)/i', $headers, $matches)) {
+                return (int) $matches[1];
+            }
+        } catch (Exception $e) {
+            Log::warning('Failed to fetch remote file size: ' . $e->getMessage());
+        }
+
+        return 0;
+    }
+
+    /**
+     * Extract metadata using ffprobe if installed, or fallback to native PHP file info or remote info.
      */
     public function probeMetadata(string $relativePath, ?StorageBox $storageBox = null): array
     {
-        $fullPath = $this->resolveRealPath($relativePath, $storageBox);
+        $fullPath = null;
+        try {
+            $fullPath = $this->resolveRealPath($relativePath, $storageBox);
+        } catch (Exception $e) {
+            // Path traversal or invalid path
+        }
 
-        if (! file_exists($fullPath)) {
+        if (! $fullPath || ! file_exists($fullPath)) {
+            if ($storageBox && ! empty($storageBox->host) && ! empty($storageBox->username)) {
+                $remoteSize = $this->fetchRemoteFileSize($relativePath, $storageBox);
+                $fileName = basename($relativePath);
+                $extension = pathinfo($relativePath, PATHINFO_EXTENSION);
+
+                return [
+                    'file_name' => $fileName,
+                    'file_size' => $remoteSize,
+                    'extension' => strtolower($extension),
+                    'mime_type' => 'video/x-matroska',
+                    'duration_seconds' => null,
+                    'width' => null,
+                    'height' => null,
+                    'video_codec' => null,
+                    'audio_codec' => null,
+                    'bitrate' => null,
+                ];
+            }
+
             throw new InvalidArgumentException('File does not exist on Storage Box.');
         }
 
@@ -138,3 +206,4 @@ class StorageBoxService
         return $metadata;
     }
 }
+
