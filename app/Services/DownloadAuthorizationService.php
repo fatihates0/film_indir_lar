@@ -60,11 +60,7 @@ class DownloadAuthorizationService
                 $existingSession->update(['file_size' => $media->file_size]);
             }
 
-            $downloadUrl = URL::temporarySignedRoute(
-                'download.stream',
-                $existingSession->expires_at,
-                ['token' => $existingSession->token]
-            );
+            $downloadUrl = route('download.stream', ['token' => $existingSession->token]);
 
             return [
                 'download_url' => $downloadUrl,
@@ -110,11 +106,7 @@ class DownloadAuthorizationService
             'user_agent' => $userAgent,
         ]);
 
-        $downloadUrl = URL::temporarySignedRoute(
-            'download.stream',
-            $expiresAt,
-            ['token' => $token]
-        );
+        $downloadUrl = route('download.stream', ['token' => $token]);
 
         return [
             'download_url' => $downloadUrl,

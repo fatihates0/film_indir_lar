@@ -15,11 +15,11 @@ class DownloadController extends Controller
 
     public function stream(string $token, Request $request): Response
     {
-        if (! $request->hasValidSignature()) {
-            abort(403, 'Geçersiz veya süresi dolmuş indirme bağlantısı.');
-        }
+        $session = DownloadSession::where('token', $token)->first();
 
-        $session = DownloadSession::where('token', $token)->firstOrFail();
+        if (! $session) {
+            abort(404, 'İndirme oturumu bulunamadı veya geçersiz.');
+        }
 
         return $this->downloadService->stream($session, $request);
     }
