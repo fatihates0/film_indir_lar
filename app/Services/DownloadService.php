@@ -71,6 +71,22 @@ class DownloadService
             }
         }
 
+        // Fast handling for HTTP HEAD requests (IDM link verification, batch clipboard link scanning)
+        if ($request->isMethod('HEAD')) {
+            $response = response('', 200, [
+                'Content-Type' => $media->mime_type ?: 'application/octet-stream',
+                'Content-Disposition' => 'attachment; filename="' . rawurlencode($media->file_name) . '"; filename*=UTF-8\'\'' . rawurlencode($media->file_name),
+                'Accept-Ranges' => 'bytes',
+                'X-Accel-Buffering' => 'no',
+            ]);
+
+            if ($fileSize > 0) {
+                $response->headers->set('Content-Length', (string) $fileSize);
+            }
+
+            return $response;
+        }
+
         $rangeHeader = $request->header('Range');
 
         $start = 0;
@@ -91,42 +107,51 @@ class DownloadService
 
         $length = $fileSize > 0 ? max(0, ($end - $start) + 1) : 0;
 
-        // Verify quota can handle this chunk
-        if (! $this->quotaService->canConsume($user, $length)) {
-            abort(402, 'İndirmeyi devam ettirmek için kotanız yetersizdir.');
+        // Calculate actual unconsumed bytes for this session to prevent IDM multi-thread quota multiplication
+        $bytesToConsume = 0;
+        if ($fileSize > 0) {
+            $targetTransferred = min($fileSize, max($session->bytes_transferred, $start + $length));
+            $bytesToConsume = max(0, $targetTransferred - $session->bytes_transferred);
+        } else {
+            $bytesToConsume = $length;
         }
 
-        // Record consumption
-        try {
-            $context = new UsageContext(
-                source: UsageSource::DOWNLOAD,
-                bytes: $length,
-                mediaId: $media->id,
-                downloadSessionId: $session->id,
-                metadata: [
-                    'range_start' => $start,
-                    'range_end' => $end,
-                    'file_name' => $media->file_name,
-                ]
-            );
-
-            $this->quotaService->consume($user, $context);
-
-            $session->update([
-                'bytes_transferred' => $session->bytes_transferred + $length,
-                'last_byte_position' => $end,
-                'last_activity_at' => Carbon::now(),
-            ]);
-
-            if ($fileSize > 0 && ($session->bytes_transferred + $length) >= $fileSize) {
-                $session->update([
-                    'status' => DownloadStatus::COMPLETED,
-                    'completed_at' => Carbon::now(),
-                ]);
+        if ($bytesToConsume > 0) {
+            if (! $this->quotaService->canConsume($user, $bytesToConsume)) {
+                abort(402, 'İndirmeyi devam ettirmek için kotanız yetersizdir.');
             }
-        } catch (\Exception $e) {
-            Log::error('Download quota recording failed: ' . $e->getMessage());
-            abort(402, $e->getMessage());
+
+            try {
+                $context = new UsageContext(
+                    source: UsageSource::DOWNLOAD,
+                    bytes: $bytesToConsume,
+                    mediaId: $media->id,
+                    downloadSessionId: $session->id,
+                    metadata: [
+                        'range_start' => $start,
+                        'range_end' => $end,
+                        'file_name' => $media->file_name,
+                    ]
+                );
+
+                $this->quotaService->consume($user, $context);
+
+                $session->update([
+                    'bytes_transferred' => $session->bytes_transferred + $bytesToConsume,
+                    'last_byte_position' => max($session->last_byte_position, $end),
+                    'last_activity_at' => Carbon::now(),
+                ]);
+
+                if ($fileSize > 0 && $session->bytes_transferred >= $fileSize) {
+                    $session->update([
+                        'status' => DownloadStatus::COMPLETED,
+                        'completed_at' => Carbon::now(),
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::error('Download quota recording failed: ' . $e->getMessage());
+                abort(402, $e->getMessage());
+            }
         }
 
         // Close session lock before streaming to prevent blocking other HTTP requests/navigations from the same user
