@@ -17,7 +17,7 @@ return new class extends Migration
             $table->foreignId('plex_account_id')->nullable()->constrained('plex_accounts')->nullOnDelete();
             $table->foreignId('media_id')->nullable()->constrained('media')->nullOnDelete();
             $table->string('plex_session_id');
-            $table->timestamp('started_at');
+            $table->timestamp('started_at')->nullable();
             $table->timestamp('last_seen_at')->nullable();
             $table->timestamp('stopped_at')->nullable();
             $table->unsignedBigInteger('last_position_ms')->default(0);

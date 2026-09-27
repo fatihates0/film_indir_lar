@@ -16,8 +16,8 @@ return new class extends Migration
             $table->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
             $table->unsignedBigInteger('quota_limit_bytes');
             $table->unsignedBigInteger('used_bytes')->default(0);
-            $table->timestamp('period_started_at');
-            $table->timestamp('period_expires_at');
+            $table->timestamp('period_started_at')->nullable();
+            $table->timestamp('period_expires_at')->nullable();
             $table->timestamps();
 
             $table->index(['user_id', 'period_expires_at']);

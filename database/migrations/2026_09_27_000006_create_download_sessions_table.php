@@ -20,10 +20,10 @@ return new class extends Migration
             $table->unsignedBigInteger('bytes_transferred')->default(0);
             $table->unsignedBigInteger('last_byte_position')->default(0);
             $table->string('status')->default('active'); // active, completed, expired, cancelled
-            $table->timestamp('started_at');
+            $table->timestamp('started_at')->nullable();
             $table->timestamp('last_activity_at')->nullable();
             $table->timestamp('completed_at')->nullable();
-            $table->timestamp('expires_at');
+            $table->timestamp('expires_at')->nullable();
             $table->string('ip_address', 45)->nullable();
             $table->text('user_agent')->nullable();
             $table->timestamps();
