@@ -102,8 +102,25 @@ class StorageBoxService
             $remoteStreamUrl = rtrim($host, '/') . '/' . $cleanPath;
         }
 
+        // Method 1 (SFTP): If disk_type is sftp or password present
+        if ($storageBox->disk_type === 'sftp' && ! empty($storageBox->password)) {
+            try {
+                $port = $storageBox->port ?: 22;
+                $sftp = new \phpseclib3\Net\SFTP($host, $port, 5);
+                if ($sftp->login($storageBox->username, $storageBox->password)) {
+                    $remotePath = '/' . trim(str_replace('\\', '/', $relativePath), '/');
+                    $stat = $sftp->stat($remotePath);
+                    if ($stat && isset($stat['size'])) {
+                        return (int) $stat['size'];
+                    }
+                }
+            } catch (Exception $e) {
+                Log::warning('SFTP fetchRemoteFileSize failed: ' . $e->getMessage());
+            }
+        }
+
         try {
-            // Method 1: WebDAV PROPFIND (100% reliable for Hetzner Storage Box)
+            // Method 2: WebDAV PROPFIND (100% reliable for Hetzner Storage Box WebDAV)
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
             curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
@@ -123,7 +140,7 @@ class StorageBoxService
                 return (int) $matches[1];
             }
 
-            // Method 2: HTTP Range 0-0 request
+            // Method 3: HTTP Range 0-0 request
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $remoteStreamUrl);
             curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
@@ -155,6 +172,19 @@ class StorageBoxService
                     $len = (int) $matches[1];
                     if ($len > 1) {
                         return $len;
+                    }
+                }
+            }
+
+            // Method 4: Fallback to SFTP if WebDAV failed
+            if (! empty($storageBox->password)) {
+                $port = $storageBox->port ?: 22;
+                $sftp = new \phpseclib3\Net\SFTP($host, $port, 5);
+                if ($sftp->login($storageBox->username, $storageBox->password)) {
+                    $remotePath = '/' . trim(str_replace('\\', '/', $relativePath), '/');
+                    $stat = $sftp->stat($remotePath);
+                    if ($stat && isset($stat['size'])) {
+                        return (int) $stat['size'];
                     }
                 }
             }
