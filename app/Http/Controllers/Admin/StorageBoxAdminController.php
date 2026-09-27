@@ -4,11 +4,15 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\MediaType;
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessRemoteTransferJob;
 use App\Models\Media;
+use App\Models\RemoteTransfer;
 use App\Models\StorageBox;
 use App\Services\AuditLogService;
 use App\Services\MediaScannerService;
+use App\Services\RemoteTransferService;
 use App\Services\StorageBoxService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -22,6 +26,7 @@ class StorageBoxAdminController extends Controller
         protected StorageBoxService $storageBoxService,
         protected MediaScannerService $scannerService,
         protected AuditLogService $auditLogService,
+        protected RemoteTransferService $remoteTransferService,
     ) {}
 
     public function index(): Response
@@ -53,8 +58,34 @@ class StorageBoxAdminController extends Controller
                 ];
             });
 
+        $recentTransfers = RemoteTransfer::with('storageBox')
+            ->latest()
+            ->take(15)
+            ->get()
+            ->map(fn ($t) => [
+                'id' => $t->id,
+                'storage_box_id' => $t->storage_box_id,
+                'storage_box_name' => $t->storageBox?->name ?? 'Bilinmiyor',
+                'source_url' => $t->source_url,
+                'target_folder' => $t->target_folder,
+                'file_name' => $t->file_name,
+                'relative_path' => $t->relative_path,
+                'total_bytes' => $t->total_bytes,
+                'total_formatted' => $this->remoteTransferService->formatBytes($t->total_bytes),
+                'transferred_bytes' => $t->transferred_bytes,
+                'transferred_formatted' => $this->remoteTransferService->formatBytes($t->transferred_bytes),
+                'progress_percent' => $t->progress_percent,
+                'speed_bps' => $t->speed_bps,
+                'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps) . '/s',
+                'status' => $t->status,
+                'error_message' => $t->error_message,
+                'media_id' => $t->media_id,
+                'created_at' => $t->created_at?->diffForHumans(),
+            ]);
+
         return Inertia::render('Admin/StorageBoxes/Index', [
             'boxes' => $boxes,
+            'recent_transfers' => $recentTransfers,
         ]);
     }
 
@@ -565,4 +596,126 @@ class StorageBoxAdminController extends Controller
             'files' => $files,
         ];
     }
+
+    /**
+     * Inspect remote URL and return detected filename and size.
+     */
+    public function probeUrl(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'url' => ['required', 'url', 'max:2000'],
+        ]);
+
+        $probe = $this->remoteTransferService->probeUrl($validated['url']);
+
+        return response()->json($probe);
+    }
+
+    /**
+     * Start a remote file transfer job into chosen Storage Box and folder.
+     */
+    public function startRemoteTransfer(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'source_url' => ['required', 'url', 'max:2000'],
+            'storage_box_id' => ['required', 'exists:storage_boxes,id'],
+            'target_folder' => ['nullable', 'string', 'max:255'],
+            'file_name' => ['required', 'string', 'max:255'],
+            'auto_add_media' => ['nullable', 'boolean'],
+        ]);
+
+        $storageBox = StorageBox::findOrFail($validated['storage_box_id']);
+        $folder = trim($validated['target_folder'] ?? 'Filmler', '/\\');
+        $fileName = trim($validated['file_name']);
+
+        // Probe size
+        $probe = $this->remoteTransferService->probeUrl($validated['source_url']);
+        $totalBytes = $probe['file_size'] ?? 0;
+
+        $relativePath = ($folder ? $folder . '/' : '') . $fileName;
+
+        $transfer = RemoteTransfer::create([
+            'storage_box_id' => $storageBox->id,
+            'source_url' => $validated['source_url'],
+            'target_folder' => $folder ?: 'Filmler',
+            'file_name' => $fileName,
+            'relative_path' => $relativePath,
+            'total_bytes' => $totalBytes,
+            'transferred_bytes' => 0,
+            'progress_percent' => 0.00,
+            'speed_bps' => 0,
+            'status' => 'pending',
+            'auto_add_media' => $request->boolean('auto_add_media', true),
+        ]);
+
+        // Dispatch background worker job
+        ProcessRemoteTransferJob::dispatch($transfer);
+
+        $this->auditLogService->log(
+            action: 'remote_transfer_started',
+            targetType: 'RemoteTransfer',
+            targetId: (string) $transfer->id,
+            newValues: $transfer->toArray()
+        );
+
+        return back()->with('message', sprintf(
+            '"%s" dosyasının %s içerisine aktarımı arka planda başlatıldı.',
+            $fileName,
+            $storageBox->name
+        ));
+    }
+
+    /**
+     * Get real-time progress for all active and recent transfers.
+     */
+    public function getTransfers(): JsonResponse
+    {
+        $transfers = RemoteTransfer::with('storageBox')
+            ->latest()
+            ->take(20)
+            ->get()
+            ->map(fn ($t) => [
+                'id' => $t->id,
+                'storage_box_id' => $t->storage_box_id,
+                'storage_box_name' => $t->storageBox?->name ?? 'Bilinmiyor',
+                'source_url' => $t->source_url,
+                'target_folder' => $t->target_folder,
+                'file_name' => $t->file_name,
+                'relative_path' => $t->relative_path,
+                'total_bytes' => $t->total_bytes,
+                'total_formatted' => $this->remoteTransferService->formatBytes($t->total_bytes),
+                'transferred_bytes' => $t->transferred_bytes,
+                'transferred_formatted' => $this->remoteTransferService->formatBytes($t->transferred_bytes),
+                'progress_percent' => $t->progress_percent,
+                'speed_bps' => $t->speed_bps,
+                'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps) . '/s',
+                'status' => $t->status,
+                'error_message' => $t->error_message,
+                'media_id' => $t->media_id,
+                'created_at' => $t->created_at?->diffForHumans(),
+            ]);
+
+        return response()->json([
+            'transfers' => $transfers,
+            'has_active' => $transfers->contains(fn ($t) => in_array($t['status'], ['pending', 'transferring'])),
+        ]);
+    }
+
+    /**
+     * Cancel or delete a transfer.
+     */
+    public function cancelTransfer(RemoteTransfer $transfer): JsonResponse
+    {
+        if (in_array($transfer->status, ['pending', 'transferring'])) {
+            $transfer->update([
+                'status' => 'cancelled',
+                'error_message' => 'Kullanıcı tarafından iptal edildi.',
+            ]);
+        } else {
+            $transfer->delete();
+        }
+
+        return response()->json(['status' => 'success']);
+    }
 }
+

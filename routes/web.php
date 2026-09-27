@@ -71,6 +71,12 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
     Route::delete('/storage-boxes/{storage_box}', [StorageBoxAdminController::class, 'destroy'])->name('storage-boxes.destroy');
     Route::post('/storage-boxes/{storage_box}/scan', [StorageBoxAdminController::class, 'scan'])->name('storage-boxes.scan');
     Route::post('/storage-boxes/{storage_box}/media', [StorageBoxAdminController::class, 'addMedia'])->name('storage-boxes.add-media');
+
+    // Remote Transfers
+    Route::post('/storage-boxes/probe-url', [StorageBoxAdminController::class, 'probeUrl'])->name('storage-boxes.probe-url');
+    Route::post('/storage-boxes/remote-transfer', [StorageBoxAdminController::class, 'startRemoteTransfer'])->name('storage-boxes.remote-transfer');
+    Route::get('/storage-boxes/transfers', [StorageBoxAdminController::class, 'getTransfers'])->name('storage-boxes.transfers');
+    Route::delete('/storage-boxes/transfers/{transfer}', [StorageBoxAdminController::class, 'cancelTransfer'])->name('storage-boxes.cancel-transfer');
 });
 
 require __DIR__.'/auth.php';
