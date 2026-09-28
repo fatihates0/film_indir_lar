@@ -101,7 +101,7 @@ class RemoteTransferService
     /**
      * Parse bulk URLs and enqueue all valid transfers.
      */
-    public function createBulkTransfers(string|array $rawUrls, StorageBox $storageBox, ?string $targetFolder = null, bool $autoAddMedia = true): array
+    public function createBulkTransfers(string|array $rawUrls, StorageBox|string|null $storageBox = null, ?string $targetFolder = null, bool $autoAddMedia = true): array
     {
         $lines = is_array($rawUrls) ? $rawUrls : preg_split('/[\r\n]+/', trim($rawUrls));
         $validUrls = [];
@@ -125,6 +125,7 @@ class RemoteTransferService
         foreach ($validUrls as $url) {
             try {
                 $probe = $this->probeUrl($url);
+                $fileSize = $probe['file_size'] ?? 0;
                 $fileName = $probe['file_name'] ?: 'media_' . time() . '_' . Str::random(5) . '.mkv';
 
                 $folder = ! empty($targetFolder) && $targetFolder !== 'auto'
@@ -133,13 +134,16 @@ class RemoteTransferService
 
                 $relativePath = ($folder ? $folder . '/' : '') . $fileName;
 
+                // Select target storage box (random with space check if random/null requested)
+                $targetBox = $this->selectStorageBox($storageBox, $fileSize);
+
                 $transfer = RemoteTransfer::create([
-                    'storage_box_id' => $storageBox->id,
+                    'storage_box_id' => $targetBox->id,
                     'source_url' => $url,
                     'target_folder' => $folder,
                     'file_name' => $fileName,
                     'relative_path' => $relativePath,
-                    'total_bytes' => $probe['file_size'] ?? 0,
+                    'total_bytes' => $fileSize,
                     'transferred_bytes' => 0,
                     'progress_percent' => 0.00,
                     'speed_bps' => 0,
@@ -157,10 +161,11 @@ class RemoteTransferService
             }
         }
 
+        $auditTargetId = $storageBox instanceof StorageBox ? (string) $storageBox->id : 'random';
         $this->auditLogService->log(
             action: 'bulk_remote_transfers_queued',
             targetType: 'StorageBox',
-            targetId: (string) $storageBox->id,
+            targetId: $auditTargetId,
             newValues: [
                 'total_requested' => count($validUrls),
                 'queued_count' => count($queued),
@@ -199,6 +204,25 @@ class RemoteTransferService
             ]);
 
             return false;
+        }
+
+        // Automatic Space Protection: If current storage box is out of space, redirect to next available one!
+        if ($transfer->total_bytes > 0 && ! $this->hasAvailableSpace($storageBox, $transfer->total_bytes)) {
+            try {
+                $alternateBox = $this->selectStorageBox('random', $transfer->total_bytes, [$storageBox->id]);
+                Log::info("Storage Box '{$storageBox->name}' dolu olduğu için transfer #{$transfer->id} ({$transfer->file_name}) otomatik olarak '{$alternateBox->name}' kutusuna yönlendirildi.");
+                $transfer->update([
+                    'storage_box_id' => $alternateBox->id,
+                ]);
+                $storageBox = $alternateBox;
+            } catch (Exception $e) {
+                $transfer->update([
+                    'status' => 'failed',
+                    'error_message' => "Hedef Storage Box ({$storageBox->name}) üzerinde yeterli boş alan yok ve alternatif boş Storage Box bulunamadı.",
+                ]);
+
+                return false;
+            }
         }
 
         try {
@@ -621,5 +645,115 @@ class RemoteTransferService
         } catch (\Throwable $e) {
             Log::warning("Could not cleanup partial files for transfer #{$transfer->id}: " . $e->getMessage());
         }
+    }
+
+    /**
+     * Select a storage box randomly or specifically, ensuring sufficient free space.
+     * If the randomly picked storage box doesn't have space, cycles to the next available one.
+     *
+     * @param StorageBox|int|string|null $boxOrMode
+     * @param int $requiredBytes
+     * @param array<int> $excludeBoxIds
+     * @return StorageBox
+     * @throws Exception
+     */
+    public function selectStorageBox(StorageBox|int|string|null $boxOrMode = 'random', int $requiredBytes = 0, array $excludeBoxIds = []): StorageBox
+    {
+        // If a specific StorageBox instance was passed
+        if ($boxOrMode instanceof StorageBox) {
+            return $boxOrMode;
+        }
+
+        // If a specific numeric ID was passed (not 'random' or 'auto')
+        if (is_numeric($boxOrMode) && (int) $boxOrMode > 0) {
+            $specificBox = StorageBox::find((int) $boxOrMode);
+            if ($specificBox) {
+                return $specificBox;
+            }
+        }
+
+        // Random mode: query all active storage boxes
+        $query = StorageBox::where('is_active', true);
+        if (! empty($excludeBoxIds)) {
+            $query->whereNotIn('id', $excludeBoxIds);
+        }
+
+        $activeBoxes = $query->get();
+        if ($activeBoxes->isEmpty()) {
+            throw new Exception('Sistemde aktif bir Storage Box bulunamadı.');
+        }
+
+        // Shuffle the boxes randomly
+        $shuffledBoxes = $activeBoxes->shuffle();
+
+        // 1. Try to find a box that has enough verified free space
+        foreach ($shuffledBoxes as $candidate) {
+            if ($this->hasAvailableSpace($candidate, $requiredBytes)) {
+                return $candidate;
+            }
+        }
+
+        // 2. If no candidate has enough verified space, check for unconstrained / unmeasured boxes
+        foreach ($shuffledBoxes as $candidate) {
+            $free = $this->getAvailableSpace($candidate);
+            if ($free === null) {
+                return $candidate;
+            }
+        }
+
+        // 3. Fallback: If all boxes were checked and all are full, throw descriptive exception
+        $formattedRequired = $this->formatBytes($requiredBytes);
+        throw new Exception("Hiçbir aktif Storage Box üzerinde yeterli boş alan bulunamadı. (Gerekli: {$formattedRequired})");
+    }
+
+    /**
+     * Get free space in bytes for a given Storage Box.
+     */
+    public function getAvailableSpace(StorageBox $box): ?int
+    {
+        // 1. If mounted and accessible on local filesystem
+        if (! empty($box->mount_path) && file_exists($box->mount_path)) {
+            $free = @disk_free_space($box->mount_path);
+            if ($free !== false && is_numeric($free)) {
+                return (int) $free;
+            }
+        }
+
+        // 2. Check metadata quota if defined
+        if (! empty($box->metadata['quota_bytes']) && is_numeric($box->metadata['quota_bytes'])) {
+            $used = $box->media()->sum('file_size');
+            return max(0, (int) $box->metadata['quota_bytes'] - (int) $used);
+        }
+
+        if (! empty($box->metadata['quota_gb']) && is_numeric($box->metadata['quota_gb'])) {
+            $maxBytes = (int) $box->metadata['quota_gb'] * 1073741824;
+            $used = $box->media()->sum('file_size');
+            return max(0, $maxBytes - (int) $used);
+        }
+
+        // 3. If online via WebDAV or mounted, but specific disk_free_space is not available
+        if ($this->storageBoxService->isMounted($box)) {
+            // Default 500 GB available buffer if unmeasurable
+            return 500 * 1073741824;
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if a storage box has sufficient available space.
+     */
+    public function hasAvailableSpace(StorageBox $box, int $requiredBytes = 0): bool
+    {
+        $available = $this->getAvailableSpace($box);
+        if ($available === null) {
+            return false;
+        }
+
+        // Keep a 500 MB safety buffer
+        $buffer = 500 * 1024 * 1024;
+        $needed = $requiredBytes > 0 ? ($requiredBytes + $buffer) : $buffer;
+
+        return $available >= $needed;
     }
 }

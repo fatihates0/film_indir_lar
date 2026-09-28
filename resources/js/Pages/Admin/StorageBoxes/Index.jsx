@@ -32,7 +32,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
 
     const remoteForm = useForm({
         source_url: '',
-        storage_box_id: boxes.length > 0 ? boxes[0].id : '',
+        storage_box_id: 'random',
         target_folder: 'Filmler',
         file_name: '',
         auto_add_media: true,
@@ -40,7 +40,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
 
     const bulkForm = useForm({
         urls: '',
-        storage_box_id: boxes.length > 0 ? boxes[0].id : '',
+        storage_box_id: 'random',
         target_folder: 'Filmler',
         auto_add_media: true,
     });
@@ -1211,6 +1211,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                                                 className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
                                                 required
                                             >
+                                                <option value="random">🎲 Rastgele (Otomatik Boş Alan Kontrollü)</option>
                                                 {boxes.map((b) => (
                                                     <option key={b.id} value={b.id}>
                                                         {b.name} ({b.host || 'Yerel Mount'})
@@ -1295,6 +1296,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                                                 className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
                                                 required
                                             >
+                                                <option value="random">🎲 Rastgele (Her Link İçin Boş Alanlı Kutuya Dağıt)</option>
                                                 {boxes.map((b) => (
                                                     <option key={b.id} value={b.id}>
                                                         {b.name} ({b.host || 'Yerel Mount'})

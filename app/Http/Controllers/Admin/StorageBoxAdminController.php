@@ -626,19 +626,24 @@ class StorageBoxAdminController extends Controller
     {
         $validated = $request->validate([
             'source_url' => ['required', 'url', 'max:2000'],
-            'storage_box_id' => ['required', 'exists:storage_boxes,id'],
+            'storage_box_id' => ['required'],
             'target_folder' => ['nullable', 'string', 'max:255'],
             'file_name' => ['required', 'string', 'max:255'],
             'auto_add_media' => ['nullable', 'boolean'],
         ]);
 
-        $storageBox = StorageBox::findOrFail($validated['storage_box_id']);
         $folder = trim($validated['target_folder'] ?? 'Filmler', '/\\');
         $fileName = trim($validated['file_name']);
 
         // Probe size
         $probe = $this->remoteTransferService->probeUrl($validated['source_url']);
         $totalBytes = $probe['file_size'] ?? 0;
+
+        try {
+            $storageBox = $this->remoteTransferService->selectStorageBox($validated['storage_box_id'], $totalBytes);
+        } catch (Exception $e) {
+            return back()->withErrors(['storage_box_id' => $e->getMessage()]);
+        }
 
         $relativePath = ($folder ? $folder . '/' : '') . $fileName;
 
@@ -666,10 +671,13 @@ class StorageBoxAdminController extends Controller
             newValues: $transfer->toArray()
         );
 
+        $isRandom = in_array($validated['storage_box_id'], ['random', 'auto']);
+        $boxMsg = $isRandom ? "{$storageBox->name} (Rastgele / Boş Alana Sahip)" : $storageBox->name;
+
         return back()->with('message', sprintf(
             '"%s" dosyasının %s içerisine aktarımı arka planda başlatıldı.',
             $fileName,
-            $storageBox->name
+            $boxMsg
         ));
     }
 
@@ -680,17 +688,17 @@ class StorageBoxAdminController extends Controller
     {
         $validated = $request->validate([
             'urls' => ['required', 'string'],
-            'storage_box_id' => ['required', 'exists:storage_boxes,id'],
+            'storage_box_id' => ['required'],
             'target_folder' => ['nullable', 'string', 'max:255'],
             'auto_add_media' => ['nullable', 'boolean'],
         ]);
 
-        $storageBox = StorageBox::findOrFail($validated['storage_box_id']);
+        $boxMode = $validated['storage_box_id'];
         $folder = trim($validated['target_folder'] ?? 'Filmler', '/\\');
 
         $result = $this->remoteTransferService->createBulkTransfers(
             rawUrls: $validated['urls'],
-            storageBox: $storageBox,
+            storageBox: in_array($boxMode, ['random', 'auto']) ? 'random' : StorageBox::findOrFail($boxMode),
             targetFolder: $folder,
             autoAddMedia: $request->boolean('auto_add_media', true)
         );
@@ -699,10 +707,12 @@ class StorageBoxAdminController extends Controller
             return back()->with('message', 'Geçerli bir URL bulunamadı veya aktarıma uygun link tespit edilemedi.');
         }
 
+        $boxLabel = in_array($boxMode, ['random', 'auto']) ? 'Rastgele / Boş Alanlı Storage Boxlar' : 'Storage Box';
+
         return back()->with('message', sprintf(
             'Toplam %d adet indirme linki %s için başarıyla kuyruğa eklendi. Sırayla aktarılacaktır.',
             $result['queued'],
-            $storageBox->name
+            $boxLabel
         ));
     }
 

@@ -180,3 +180,44 @@ test('admin can bulk cancel active transfers', function () {
     expect($t1->fresh()->status)->toBe('cancelled');
 });
 
+test('admin can upload to random storage box with space check and fallback', function () {
+    Queue::fake();
+
+    $box2 = StorageBox::create([
+        'name' => 'Full Box',
+        'slug' => 'full-box',
+        'mount_path' => storage_path('app/full_box'),
+        'disk_type' => 'cifs',
+        'is_active' => true,
+        'metadata' => ['quota_bytes' => 100], // only 100 bytes limit
+    ]);
+
+    // Single remote transfer with random storage box
+    $response = $this->actingAs($this->admin)->post(route('admin.storage-boxes.remote-transfer'), [
+        'source_url' => 'https://example.com/random-movie.mkv',
+        'storage_box_id' => 'random',
+        'target_folder' => 'Filmler',
+        'file_name' => 'random-movie.mkv',
+        'auto_add_media' => true,
+    ]);
+
+    $response->assertRedirect();
+    $this->assertDatabaseHas('remote_transfers', [
+        'file_name' => 'random-movie.mkv',
+        'status' => 'pending',
+    ]);
+
+    // Bulk transfer with random storage box
+    $bulkResponse = $this->actingAs($this->admin)->post(route('admin.storage-boxes.bulk-remote-transfer'), [
+        'urls' => "https://example.com/film1.mkv\nhttps://example.com/film2.mkv",
+        'storage_box_id' => 'random',
+        'target_folder' => 'Filmler',
+        'auto_add_media' => true,
+    ]);
+
+    $bulkResponse->assertRedirect();
+    $this->assertDatabaseHas('remote_transfers', [
+        'source_url' => 'https://example.com/film1.mkv',
+    ]);
+});
+
