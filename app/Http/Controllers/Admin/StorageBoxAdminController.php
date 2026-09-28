@@ -58,11 +58,12 @@ class StorageBoxAdminController extends Controller
                 ];
             });
 
-        $recentTransfers = RemoteTransfer::with('storageBox')
+        $paginatedTransfers = RemoteTransfer::with('storageBox')
             ->latest()
-            ->take(15)
-            ->get()
-            ->map(fn ($t) => [
+            ->paginate(10);
+
+        $transfersData = [
+            'data' => $paginatedTransfers->getCollection()->map(fn ($t) => [
                 'id' => $t->id,
                 'storage_box_id' => $t->storage_box_id,
                 'storage_box_name' => $t->storageBox?->name ?? 'Bilinmiyor',
@@ -81,11 +82,18 @@ class StorageBoxAdminController extends Controller
                 'error_message' => $t->error_message,
                 'media_id' => $t->media_id,
                 'created_at' => $t->created_at?->diffForHumans(),
-            ]);
+            ]),
+            'pagination' => [
+                'current_page' => $paginatedTransfers->currentPage(),
+                'last_page' => $paginatedTransfers->lastPage(),
+                'per_page' => $paginatedTransfers->perPage(),
+                'total' => $paginatedTransfers->total(),
+            ],
+        ];
 
         return Inertia::render('Admin/StorageBoxes/Index', [
             'boxes' => $boxes,
-            'recent_transfers' => $recentTransfers,
+            'recent_transfers' => $transfersData,
         ]);
     }
 
@@ -699,38 +707,70 @@ class StorageBoxAdminController extends Controller
     }
 
     /**
-     * Get real-time progress for all active and recent transfers.
+     * Get real-time progress for active and recent transfers with pagination.
      */
-    public function getTransfers(): JsonResponse
+    public function getTransfers(Request $request): JsonResponse
     {
-        $transfers = RemoteTransfer::with('storageBox')
+        $perPage = (int) $request->input('per_page', 10);
+        $paginated = RemoteTransfer::with('storageBox')
             ->latest()
-            ->take(20)
-            ->get()
-            ->map(fn ($t) => [
-                'id' => $t->id,
-                'storage_box_id' => $t->storage_box_id,
-                'storage_box_name' => $t->storageBox?->name ?? 'Bilinmiyor',
-                'source_url' => $t->source_url,
-                'target_folder' => $t->target_folder,
-                'file_name' => $t->file_name,
-                'relative_path' => $t->relative_path,
-                'total_bytes' => $t->total_bytes,
-                'total_formatted' => $this->remoteTransferService->formatBytes($t->total_bytes),
-                'transferred_bytes' => $t->transferred_bytes,
-                'transferred_formatted' => $this->remoteTransferService->formatBytes($t->transferred_bytes),
-                'progress_percent' => $t->progress_percent,
-                'speed_bps' => $t->speed_bps,
-                'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps) . '/s',
-                'status' => $t->status,
-                'error_message' => $t->error_message,
-                'media_id' => $t->media_id,
-                'created_at' => $t->created_at?->diffForHumans(),
-            ]);
+            ->paginate($perPage);
+
+        $transfers = $paginated->getCollection()->map(fn ($t) => [
+            'id' => $t->id,
+            'storage_box_id' => $t->storage_box_id,
+            'storage_box_name' => $t->storageBox?->name ?? 'Bilinmiyor',
+            'source_url' => $t->source_url,
+            'target_folder' => $t->target_folder,
+            'file_name' => $t->file_name,
+            'relative_path' => $t->relative_path,
+            'total_bytes' => $t->total_bytes,
+            'total_formatted' => $this->remoteTransferService->formatBytes($t->total_bytes),
+            'transferred_bytes' => $t->transferred_bytes,
+            'transferred_formatted' => $this->remoteTransferService->formatBytes($t->transferred_bytes),
+            'progress_percent' => $t->progress_percent,
+            'speed_bps' => $t->speed_bps,
+            'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps) . '/s',
+            'status' => $t->status,
+            'error_message' => $t->error_message,
+            'media_id' => $t->media_id,
+            'created_at' => $t->created_at?->diffForHumans(),
+        ]);
 
         return response()->json([
             'transfers' => $transfers,
-            'has_active' => $transfers->contains(fn ($t) => in_array($t['status'], ['pending', 'transferring'])),
+            'pagination' => [
+                'current_page' => $paginated->currentPage(),
+                'last_page' => $paginated->lastPage(),
+                'per_page' => $paginated->perPage(),
+                'total' => $paginated->total(),
+            ],
+            'has_active' => RemoteTransfer::whereIn('status', ['pending', 'transferring'])->exists(),
+        ]);
+    }
+
+    /**
+     * Bulk delete remote transfers.
+     */
+    public function bulkDeleteTransfers(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ids' => ['required', 'array'],
+            'ids.*' => ['integer', 'exists:remote_transfers,id'],
+        ]);
+
+        $transfers = RemoteTransfer::whereIn('id', $validated['ids'])->get();
+
+        foreach ($transfers as $transfer) {
+            if (in_array($transfer->status, ['pending', 'transferring'])) {
+                $transfer->update(['status' => 'cancelled']);
+            }
+            $transfer->delete();
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'deleted_count' => count($validated['ids']),
         ]);
     }
 

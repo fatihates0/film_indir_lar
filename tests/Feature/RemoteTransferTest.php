@@ -124,3 +124,41 @@ test('admin can queue bulk transfers from multiline urls', function () {
     Queue::assertPushed(ProcessRemoteTransferJob::class, 3);
 });
 
+test('admin can paginate transfers and bulk delete them', function () {
+    $t1 = RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/item1.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'item1.mkv',
+        'relative_path' => 'Filmler/item1.mkv',
+        'status' => 'completed',
+    ]);
+
+    $t2 = RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/item2.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'item2.mkv',
+        'relative_path' => 'Filmler/item2.mkv',
+        'status' => 'pending',
+    ]);
+
+    // Check pagination metadata
+    $response = $this->actingAs($this->admin)->getJson(route('admin.storage-boxes.transfers', ['page' => 1, 'per_page' => 1]));
+    $response->assertOk();
+    $data = $response->json();
+
+    expect($data)->toHaveKey('pagination')
+        ->and($data['pagination']['total'])->toBeGreaterThanOrEqual(2)
+        ->and(count($data['transfers']))->toBe(1);
+
+    // Bulk delete both
+    $delResponse = $this->actingAs($this->admin)->postJson(route('admin.storage-boxes.transfers.bulk-delete'), [
+        'ids' => [$t1->id, $t2->id],
+    ]);
+
+    $delResponse->assertOk();
+    $this->assertDatabaseMissing('remote_transfers', ['id' => $t1->id]);
+    $this->assertDatabaseMissing('remote_transfers', ['id' => $t2->id]);
+});
+

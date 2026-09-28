@@ -12,7 +12,20 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
 
     // Remote Upload State
     const [remoteModalOpen, setRemoteModalOpen] = useState(false);
-    const [transfers, setTransfers] = useState(recent_transfers);
+    const initialTransfers = Array.isArray(recent_transfers)
+        ? recent_transfers
+        : (recent_transfers?.data || []);
+    const initialPagination = recent_transfers?.pagination || {
+        current_page: 1,
+        last_page: 1,
+        per_page: 10,
+        total: initialTransfers.length,
+    };
+    const [transfers, setTransfers] = useState(initialTransfers);
+    const [pagination, setPagination] = useState(initialPagination);
+    const [currentPage, setCurrentPage] = useState(initialPagination.current_page || 1);
+    const [selectedTransferIds, setSelectedTransferIds] = useState([]);
+    const [isBulkDeleting, setIsBulkDeleting] = useState(false);
     const [probing, setProbing] = useState(false);
     const [probeResult, setProbeResult] = useState(null);
     const [uploadTab, setUploadTab] = useState('single'); // 'single' | 'bulk'
@@ -66,21 +79,30 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
         size_mb: 50,
     });
 
+    const fetchTransfers = (page = currentPage) => {
+        axios.get(route('admin.storage-boxes.transfers'), {
+            params: { page, per_page: 10 }
+        }).then(res => {
+            if (res.data?.transfers) {
+                setTransfers(res.data.transfers);
+            }
+            if (res.data?.pagination) {
+                setPagination(res.data.pagination);
+            }
+        }).catch(() => {});
+    };
+
     // Poll transfers every 2.5s if any are in progress
     useEffect(() => {
         const hasActive = transfers.some(t => t.status === 'pending' || t.status === 'transferring');
         if (!hasActive) return;
 
         const interval = setInterval(() => {
-            axios.get(route('admin.storage-boxes.transfers')).then(res => {
-                if (res.data?.transfers) {
-                    setTransfers(res.data.transfers);
-                }
-            }).catch(() => {});
+            fetchTransfers(currentPage);
         }, 2500);
 
         return () => clearInterval(interval);
-    }, [transfers]);
+    }, [transfers, currentPage]);
 
     const handleProbeUrl = async () => {
         if (!remoteForm.data.source_url) return;
@@ -111,9 +133,8 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                 setRemoteModalOpen(false);
                 remoteForm.reset();
                 setProbeResult(null);
-                axios.get(route('admin.storage-boxes.transfers')).then(res => {
-                    if (res.data?.transfers) setTransfers(res.data.transfers);
-                });
+                setCurrentPage(1);
+                fetchTransfers(1);
             }
         });
     };
@@ -124,9 +145,8 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
             onSuccess: () => {
                 setRemoteModalOpen(false);
                 bulkForm.reset();
-                axios.get(route('admin.storage-boxes.transfers')).then(res => {
-                    if (res.data?.transfers) setTransfers(res.data.transfers);
-                });
+                setCurrentPage(1);
+                fetchTransfers(1);
             }
         });
     };
@@ -134,9 +154,82 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
     const handleCancelTransfer = (id) => {
         if (confirm('Bu transfer işlemini iptal etmek/silmek istediğinize emin misiniz?')) {
             axios.delete(route('admin.storage-boxes.cancel-transfer', id)).then(() => {
-                setTransfers(prev => prev.filter(t => t.id !== id));
+                setSelectedTransferIds(prev => prev.filter(tid => tid !== id));
+                fetchTransfers(currentPage);
             });
         }
+    };
+
+    const handleToggleSelect = (id) => {
+        setSelectedTransferIds(prev =>
+            prev.includes(id) ? prev.filter(tid => tid !== id) : [...prev, id]
+        );
+    };
+
+    const isAllPageSelected = transfers.length > 0 && transfers.every(t => selectedTransferIds.includes(t.id));
+
+    const handleToggleSelectAll = () => {
+        if (isAllPageSelected) {
+            const pageIds = new Set(transfers.map(t => t.id));
+            setSelectedTransferIds(prev => prev.filter(id => !pageIds.has(id)));
+        } else {
+            const merged = new Set([...selectedTransferIds, ...transfers.map(t => t.id)]);
+            setSelectedTransferIds(Array.from(merged));
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedTransferIds.length === 0) return;
+        if (!confirm(`Seçili ${selectedTransferIds.length} adet aktarım kaydını silmek istediğinize emin misiniz? (Aktif indirmeler iptal edilecektir)`)) {
+            return;
+        }
+
+        setIsBulkDeleting(true);
+        try {
+            await axios.post(route('admin.storage-boxes.transfers.bulk-delete'), {
+                ids: selectedTransferIds
+            });
+            setSelectedTransferIds([]);
+            fetchTransfers(currentPage);
+        } catch (err) {
+            alert('Toplu silme başarısız: ' + (err.response?.data?.message || err.message));
+        } finally {
+            setIsBulkDeleting(false);
+        }
+    };
+
+    const handleClearCompleted = async () => {
+        const completedIds = transfers
+            .filter(t => ['completed', 'failed', 'cancelled'].includes(t.status))
+            .map(t => t.id);
+
+        if (completedIds.length === 0) {
+            alert('Bu sayfada silinebilecek tamamlanmış veya hatalı işlem bulunamadı.');
+            return;
+        }
+
+        if (!confirm(`Bu sayfadaki ${completedIds.length} adet tamamlanmış/hatalı aktarım kaydı silinsin mi?`)) {
+            return;
+        }
+
+        setIsBulkDeleting(true);
+        try {
+            await axios.post(route('admin.storage-boxes.transfers.bulk-delete'), {
+                ids: completedIds
+            });
+            setSelectedTransferIds(prev => prev.filter(id => !completedIds.includes(id)));
+            fetchTransfers(currentPage);
+        } catch (err) {
+            alert('Silme işlemi başarısız: ' + (err.response?.data?.message || err.message));
+        } finally {
+            setIsBulkDeleting(false);
+        }
+    };
+
+    const handlePageChange = (newPage) => {
+        if (newPage < 1 || newPage > (pagination?.last_page || 1) || newPage === currentPage) return;
+        setCurrentPage(newPage);
+        fetchTransfers(newPage);
     };
 
     const openRemoteModalForBox = (box) => {
@@ -341,99 +434,255 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                 <div className="rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-800">
                         <div>
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex items-center gap-2.5 flex-wrap">
                                 <h3 className="text-lg font-bold text-white tracking-tight">Uzaktan Dosya Aktarım Kuyruğu (Remote Transfers)</h3>
                                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                    {transfers.length} İşlem
+                                    {pagination?.total ?? transfers.length} Toplam İşlem
                                 </span>
                             </div>
                             <p className="text-xs text-slate-400 mt-1">Harici linklerden doğrudan Storage Box'a aktarılan dosyaların anlık durumu ve indirme hızları.</p>
                         </div>
 
-                        <button
-                            onClick={() => setRemoteModalOpen(true)}
-                            className="inline-flex items-center gap-2 self-start rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-lg transition-all"
-                        >
-                            + Yeni Link Ekle
-                        </button>
+                        <div className="flex items-center gap-2 self-start flex-wrap">
+                            {transfers.some(t => ['completed', 'failed', 'cancelled'].includes(t.status)) && (
+                                <button
+                                    type="button"
+                                    onClick={handleClearCompleted}
+                                    disabled={isBulkDeleting}
+                                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white transition-all disabled:opacity-50"
+                                    title="Bu sayfadaki sonuçlanmış veya hatalı işlemleri siler"
+                                >
+                                    <span>🧹</span>
+                                    <span>Tamamlananları Temizle</span>
+                                </button>
+                            )}
+                            <button
+                                onClick={() => setRemoteModalOpen(true)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-lg transition-all"
+                            >
+                                + Yeni Link Ekle
+                            </button>
+                        </div>
                     </div>
 
+                    {/* Bulk Selection Action Bar */}
+                    {selectedTransferIds.length > 0 && (
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-200 animate-fadeIn">
+                            <div className="flex items-center gap-2.5 text-xs font-medium">
+                                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[11px] font-bold">
+                                    {selectedTransferIds.length}
+                                </span>
+                                <span>adet işlem seçildi</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedTransferIds([])}
+                                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-all"
+                                >
+                                    Seçimi Kaldır
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={isBulkDeleting}
+                                    onClick={handleBulkDelete}
+                                    className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                                >
+                                    <span>🗑</span>
+                                    <span>{isBulkDeleting ? 'Siliniyor...' : `Seçilenleri Sil (${selectedTransferIds.length})`}</span>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {transfers.length > 0 ? (
-                        <div className="divide-y divide-slate-800/60">
-                            {transfers.map((t) => (
-                                <div key={t.id} className="py-4 first:pt-0 last:pb-0 space-y-2.5">
-                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                        <div className="space-y-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-mono text-sm font-bold text-white break-all">{t.file_name}</span>
-                                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-                                                    #{t.id}
-                                                </span>
+                        <div className="space-y-3">
+                            {/* Select All on Page Bar */}
+                            <div className="flex items-center justify-between px-2 pt-1 pb-1 text-xs text-slate-400">
+                                <label className="flex items-center gap-2 cursor-pointer select-none font-medium hover:text-slate-200 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={isAllPageSelected}
+                                        onChange={handleToggleSelectAll}
+                                        className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                                    />
+                                    <span>Bu Sayfadaki Tümünü Seç ({transfers.length})</span>
+                                </label>
+                                {pagination && pagination.last_page > 1 && (
+                                    <span className="text-[11px] text-slate-500 font-mono">
+                                        Sayfa {pagination.current_page} / {pagination.last_page}
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="divide-y divide-slate-800/60">
+                                {transfers.map((t) => {
+                                    const isSelected = selectedTransferIds.includes(t.id);
+                                    return (
+                                        <div
+                                            key={t.id}
+                                            className={`py-4 px-3 rounded-2xl transition-all ${
+                                                isSelected
+                                                    ? 'bg-indigo-950/20 border border-indigo-500/30 my-1'
+                                                    : 'hover:bg-slate-800/20'
+                                            } space-y-2.5`}
+                                        >
+                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                                <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => handleToggleSelect(t.id)}
+                                                        className="mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer flex-shrink-0"
+                                                    />
+                                                    <div className="space-y-1 min-w-0">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className="font-mono text-sm font-bold text-white break-all">{t.file_name}</span>
+                                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                                                                #{t.id}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                                                            <span>📦 <strong>{t.storage_box_name}</strong></span>
+                                                            <span>📁 Klasör: <code className="text-indigo-300">{t.target_folder}</code></span>
+                                                            <span>⏱ {t.created_at}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
+                                                    {/* Status Badge */}
+                                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
+                                                        t.status === 'completed'
+                                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                            : t.status === 'transferring'
+                                                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 animate-pulse'
+                                                            : t.status === 'pending'
+                                                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                                            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                                    }`}>
+                                                        {t.status === 'completed' && '✓ TAMAMLANDI'}
+                                                        {t.status === 'transferring' && `⚡ AKTARILIYOR (${t.speed_formatted})`}
+                                                        {t.status === 'pending' && '⏳ BEKLİYOR'}
+                                                        {t.status === 'failed' && '✕ HATA'}
+                                                        {t.status === 'cancelled' && 'İPTAL EDİLDİ'}
+                                                    </span>
+
+                                                    <button
+                                                        onClick={() => handleCancelTransfer(t.id)}
+                                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 text-xs font-medium transition-all"
+                                                        title={t.status === 'transferring' || t.status === 'pending' ? 'İptal Et' : 'Kayıttan Sil'}
+                                                    >
+                                                        {t.status === 'transferring' || t.status === 'pending' ? 'İptal' : 'Sil'}
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                                                <span>📦 <strong>{t.storage_box_name}</strong></span>
-                                                <span>📁 Klasör: <code className="text-indigo-300">{t.target_folder}</code></span>
-                                                <span>⏱ {t.created_at}</span>
+
+                                            {/* Progress Bar & Stats */}
+                                            <div className="space-y-1">
+                                                <div className="h-2 w-full rounded-full bg-slate-950 overflow-hidden border border-slate-800">
+                                                    <div
+                                                        className={`h-full transition-all duration-500 rounded-full ${
+                                                            t.status === 'completed'
+                                                                ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                                                : t.status === 'failed'
+                                                                ? 'bg-rose-500'
+                                                                : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                                                        }`}
+                                                        style={{ width: `${Math.max(t.progress_percent, t.status === 'completed' ? 100 : 2)}%` }}
+                                                    />
+                                                </div>
+
+                                                <div className="flex justify-between items-center text-[11px] text-slate-400 font-mono">
+                                                    <span>
+                                                        {t.transferred_formatted} / {t.total_formatted} ({t.progress_percent.toFixed(1)}%)
+                                                    </span>
+                                                    {t.error_message && (
+                                                        <span className="text-rose-400 truncate max-w-md">{t.error_message}</span>
+                                                    )}
+                                                    {t.status === 'transferring' && (
+                                                        <span className="text-blue-400 font-semibold">{t.speed_formatted}</span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
+                                    );
+                                })}
+                            </div>
 
-                                        <div className="flex items-center gap-3 self-end sm:self-center">
-                                            {/* Status Badge */}
-                                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
-                                                t.status === 'completed'
-                                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                                    : t.status === 'transferring'
-                                                    ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 animate-pulse'
-                                                    : t.status === 'pending'
-                                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                                    : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                                            }`}>
-                                                {t.status === 'completed' && '✓ TAMAMLANDI'}
-                                                {t.status === 'transferring' && `⚡ AKTARILIYOR (${t.speed_formatted})`}
-                                                {t.status === 'pending' && '⏳ BEKLİYOR'}
-                                                {t.status === 'failed' && '✕ HATA'}
-                                                {t.status === 'cancelled' && 'İPTAL EDİLDİ'}
-                                            </span>
-
-                                            <button
-                                                onClick={() => handleCancelTransfer(t.id)}
-                                                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 text-xs font-medium transition-all"
-                                                title={t.status === 'transferring' || t.status === 'pending' ? 'İptal Et' : 'Kayıttan Sil'}
-                                            >
-                                                {t.status === 'transferring' || t.status === 'pending' ? 'İptal' : 'Sil'}
-                                            </button>
-                                        </div>
+                            {/* Pagination Controls */}
+                            {pagination && pagination.last_page > 1 && (
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-slate-800">
+                                    <div className="text-xs text-slate-400">
+                                        Toplam <strong className="text-white">{pagination.total}</strong> aktarımdan{' '}
+                                        <strong className="text-white">
+                                            {(pagination.current_page - 1) * pagination.per_page + 1} - {Math.min(pagination.current_page * pagination.per_page, pagination.total)}
+                                        </strong>{' '}
+                                        arası gösteriliyor
                                     </div>
 
-                                    {/* Progress Bar & Stats */}
-                                    <div className="space-y-1">
-                                        <div className="h-2 w-full rounded-full bg-slate-950 overflow-hidden border border-slate-800">
-                                            <div
-                                                className={`h-full transition-all duration-500 rounded-full ${
-                                                    t.status === 'completed'
-                                                        ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                                                        : t.status === 'failed'
-                                                        ? 'bg-rose-500'
-                                                        : 'bg-gradient-to-r from-blue-500 to-indigo-500'
-                                                }`}
-                                                style={{ width: `${Math.max(t.progress_percent, t.status === 'completed' ? 100 : 2)}%` }}
-                                            />
-                                        </div>
+                                    <div className="flex items-center gap-1.5 self-center sm:self-auto">
+                                        <button
+                                            type="button"
+                                            onClick={() => handlePageChange(pagination.current_page - 1)}
+                                            disabled={pagination.current_page <= 1}
+                                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                                        >
+                                            ← Önceki
+                                        </button>
 
-                                        <div className="flex justify-between items-center text-[11px] text-slate-400 font-mono">
-                                            <span>
-                                                {t.transferred_formatted} / {t.total_formatted} ({t.progress_percent.toFixed(1)}%)
-                                            </span>
-                                            {t.error_message && (
-                                                <span className="text-rose-400 truncate max-w-md">{t.error_message}</span>
-                                            )}
-                                            {t.status === 'transferring' && (
-                                                <span className="text-blue-400 font-semibold">{t.speed_formatted}</span>
-                                            )}
-                                        </div>
+                                        {Array.from({ length: pagination.last_page }, (_, i) => i + 1)
+                                            .filter(page => {
+                                                return (
+                                                    page === 1 ||
+                                                    page === pagination.last_page ||
+                                                    Math.abs(page - pagination.current_page) <= 2
+                                                );
+                                            })
+                                            .reduce((acc, page, idx, arr) => {
+                                                if (idx > 0 && page - arr[idx - 1] > 1) {
+                                                    acc.push({ type: 'ellipsis', key: `el-${page}` });
+                                                }
+                                                acc.push({ type: 'page', number: page, key: page });
+                                                return acc;
+                                            }, [])
+                                            .map(item => {
+                                                if (item.type === 'ellipsis') {
+                                                    return (
+                                                        <span key={item.key} className="px-2 text-slate-600 text-xs">
+                                                            ...
+                                                        </span>
+                                                    );
+                                                }
+                                                const isCurrent = item.number === pagination.current_page;
+                                                return (
+                                                    <button
+                                                        key={item.key}
+                                                        type="button"
+                                                        onClick={() => handlePageChange(item.number)}
+                                                        className={`min-w-[32px] h-8 rounded-xl text-xs font-semibold transition-all ${
+                                                            isCurrent
+                                                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                                                                : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300'
+                                                        }`}
+                                                    >
+                                                        {item.number}
+                                                    </button>
+                                                );
+                                            })
+                                        }
+
+                                        <button
+                                            type="button"
+                                            onClick={() => handlePageChange(pagination.current_page + 1)}
+                                            disabled={pagination.current_page >= pagination.last_page}
+                                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                                        >
+                                            Sonraki →
+                                        </button>
                                     </div>
                                 </div>
-                            ))}
+                            )}
                         </div>
                     ) : (
                         <div className="rounded-2xl bg-slate-950/40 border border-slate-800/80 p-8 text-center text-slate-400 text-xs">
