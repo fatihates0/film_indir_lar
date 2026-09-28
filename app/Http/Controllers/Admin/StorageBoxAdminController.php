@@ -750,7 +750,7 @@ class StorageBoxAdminController extends Controller
     }
 
     /**
-     * Bulk delete remote transfers.
+     * Bulk delete remote transfers. If active transfers are present, cancels them first and then deletes.
      */
     public function bulkDeleteTransfers(Request $request): JsonResponse
     {
@@ -759,18 +759,51 @@ class StorageBoxAdminController extends Controller
             'ids.*' => ['integer', 'exists:remote_transfers,id'],
         ]);
 
-        $transfers = RemoteTransfer::whereIn('id', $validated['ids'])->get();
+        $transfers = RemoteTransfer::with('storageBox')->whereIn('id', $validated['ids'])->get();
 
+        // 1. Önce aktif çalışan veya kuyrukta bekleyen transferleri tespit edip iptal et
+        $activeTransfers = $transfers->filter(fn ($t) => in_array($t->status, ['pending', 'transferring']));
+
+        foreach ($activeTransfers as $transfer) {
+            $this->remoteTransferService->cancelTransfer($transfer);
+        }
+
+        // 2. Ardından tüm seçilen kayıtları dosyalarını da temizleyerek sil
         foreach ($transfers as $transfer) {
-            if (in_array($transfer->status, ['pending', 'transferring'])) {
-                $transfer->update(['status' => 'cancelled']);
-            }
+            $this->remoteTransferService->cleanupPartialFiles($transfer);
             $transfer->delete();
         }
 
         return response()->json([
             'status' => 'success',
+            'cancelled_count' => $activeTransfers->count(),
             'deleted_count' => count($validated['ids']),
+        ]);
+    }
+
+    /**
+     * Bulk cancel active remote transfers without deleting.
+     */
+    public function bulkCancelTransfers(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ids' => ['required', 'array'],
+            'ids.*' => ['integer', 'exists:remote_transfers,id'],
+        ]);
+
+        $transfers = RemoteTransfer::with('storageBox')->whereIn('id', $validated['ids'])->get();
+        $cancelledCount = 0;
+
+        foreach ($transfers as $transfer) {
+            if (in_array($transfer->status, ['pending', 'transferring'])) {
+                $this->remoteTransferService->cancelTransfer($transfer);
+                $cancelledCount++;
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'cancelled_count' => $cancelledCount,
         ]);
     }
 
@@ -780,11 +813,9 @@ class StorageBoxAdminController extends Controller
     public function cancelTransfer(RemoteTransfer $transfer): JsonResponse
     {
         if (in_array($transfer->status, ['pending', 'transferring'])) {
-            $transfer->update([
-                'status' => 'cancelled',
-                'error_message' => 'Kullanıcı tarafından iptal edildi.',
-            ]);
+            $this->remoteTransferService->cancelTransfer($transfer);
         } else {
+            $this->remoteTransferService->cleanupPartialFiles($transfer);
             $transfer->delete();
         }
 

@@ -162,3 +162,21 @@ test('admin can paginate transfers and bulk delete them', function () {
     $this->assertDatabaseMissing('remote_transfers', ['id' => $t2->id]);
 });
 
+test('admin can bulk cancel active transfers', function () {
+    $t1 = RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/item1.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'item1.mkv',
+        'relative_path' => 'Filmler/item1.mkv',
+        'status' => 'transferring',
+    ]);
+
+    $response = $this->actingAs($this->admin)->postJson(route('admin.storage-boxes.transfers.bulk-cancel'), [
+        'ids' => [$t1->id],
+    ]);
+
+    $response->assertOk();
+    expect($t1->fresh()->status)->toBe('cancelled');
+});
+

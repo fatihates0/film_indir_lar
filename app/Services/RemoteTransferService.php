@@ -213,6 +213,13 @@ class RemoteTransferService
                 throw new Exception("Storage Box '{$storageBox->name}' ne yerel mount olarak ne de WebDAV erişimiyle bağlanabilir durumda.");
             }
 
+            // Check if transfer was cancelled during execution before completing
+            $freshStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
+            if ($freshStatus === null || $freshStatus === 'cancelled') {
+                $this->cleanupPartialFiles($transfer);
+                return false;
+            }
+
             // Mark as completed
             $transfer->update([
                 'status' => 'completed',
@@ -239,6 +246,12 @@ class RemoteTransferService
 
             return true;
         } catch (Exception $e) {
+            $freshStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
+            if ($freshStatus === null || $freshStatus === 'cancelled') {
+                $this->cleanupPartialFiles($transfer);
+                return false;
+            }
+
             Log::error("Remote transfer #{$transfer->id} failed: " . $e->getMessage(), [
                 'exception' => $e,
                 'transfer' => $transfer->toArray(),
@@ -299,6 +312,12 @@ class RemoteTransferService
             $timeDiff = $now - $lastUpdateTime;
 
             if ($timeDiff >= 1.5) { // update database every 1.5s
+                // Check if user cancelled or deleted
+                $currentStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
+                if ($currentStatus === null || $currentStatus === 'cancelled') {
+                    return 1; // abort curl
+                }
+
                 $bytesDiff = $dlNow - $lastBytes;
                 $speedBps = $timeDiff > 0 ? (int) round($bytesDiff / $timeDiff) : 0;
                 $percent = $totalBytes > 0 ? round(($dlNow / $totalBytes) * 100, 2) : 0.00;
@@ -317,11 +336,6 @@ class RemoteTransferService
                 $lastBytes = $dlNow;
             }
 
-            // Check if user cancelled
-            if ($transfer->status === 'cancelled') {
-                return 1; // abort curl
-            }
-
             return 0;
         });
 
@@ -330,6 +344,12 @@ class RemoteTransferService
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         fclose($destHandle);
+
+        $finalStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
+        if ($finalStatus === null || $finalStatus === 'cancelled') {
+            @unlink($destFilePath);
+            throw new Exception("İşlem kullanıcı tarafından iptal edildi.");
+        }
 
         if (! $success || $httpCode >= 400) {
             @unlink($destFilePath);
@@ -407,14 +427,16 @@ class RemoteTransferService
                 return '';
             }
 
-            $chunk = fread($sourceStream, $length);
-            $chunkLen = strlen($chunk);
-            $transferredNow += $chunkLen;
-
             $now = microtime(true);
             $timeDiff = $now - $lastUpdateTime;
 
             if ($timeDiff >= 1.5) {
+                // Check if user cancelled or deleted
+                $currentStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
+                if ($currentStatus === null || $currentStatus === 'cancelled') {
+                    return ''; // stop reading chunk, abort WebDAV upload
+                }
+
                 $bytesDiff = $transferredNow - $lastBytes;
                 $speedBps = $timeDiff > 0 ? (int) round($bytesDiff / $timeDiff) : 0;
                 $percent = $totalBytes > 0 ? round(($transferredNow / $totalBytes) * 100, 2) : 0.00;
@@ -433,6 +455,10 @@ class RemoteTransferService
                 $lastBytes = $transferredNow;
             }
 
+            $chunk = fread($sourceStream, $length);
+            $chunkLen = strlen($chunk);
+            $transferredNow += $chunkLen;
+
             return $chunk;
         });
 
@@ -441,6 +467,12 @@ class RemoteTransferService
         $err = curl_error($chPut);
         curl_close($chPut);
         fclose($sourceStream);
+
+        $finalStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
+        if ($finalStatus === null || $finalStatus === 'cancelled') {
+            $this->cleanupPartialFiles($transfer);
+            throw new Exception("WebDAV transferi kullanıcı tarafından iptal edildi.");
+        }
 
         if ($httpCode !== 201 && $httpCode !== 204 && $httpCode !== 200) {
             throw new Exception("Storage Box WebDAV yükleme hatası (HTTP {$httpCode}): " . ($err ?: $res));
@@ -531,5 +563,63 @@ class RemoteTransferService
         $units = ['B', 'KB', 'MB', 'GB', 'TB'];
         $i = floor(log($bytes, 1024));
         return round($bytes / pow(1024, $i), 2) . ' ' . $units[$i];
+    }
+
+    /**
+     * Cancel an active transfer and clean up any partially written files.
+     */
+    public function cancelTransfer(RemoteTransfer $transfer): void
+    {
+        $transfer->update([
+            'status' => 'cancelled',
+            'error_message' => 'Kullanıcı tarafından iptal edildi.',
+            'speed_bps' => 0,
+        ]);
+
+        $this->cleanupPartialFiles($transfer);
+    }
+
+    /**
+     * Remove partial file from local mount or WebDAV.
+     */
+    public function cleanupPartialFiles(RemoteTransfer $transfer): void
+    {
+        $storageBox = $transfer->storageBox;
+        if (! $storageBox) {
+            return;
+        }
+
+        try {
+            $targetFolder = trim($transfer->target_folder, '/\\');
+
+            // 1. Clean from local mount if exists
+            if (! empty($storageBox->mount_path) && is_dir($storageBox->mount_path)) {
+                $fullDir = rtrim($storageBox->mount_path, '/\\') . ($targetFolder ? DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $targetFolder) : '');
+                $filePath = $fullDir . DIRECTORY_SEPARATOR . $transfer->file_name;
+                if (file_exists($filePath)) {
+                    @unlink($filePath);
+                }
+            }
+
+            // 2. Clean from WebDAV if host is configured
+            if (! empty($storageBox->host) && ! empty($storageBox->username) && ! empty($storageBox->password)) {
+                $host = $storageBox->host;
+                $baseHost = str_starts_with($host, 'http://') || str_starts_with($host, 'https://') ? rtrim($host, '/') : "https://{$host}";
+                $folderSegments = array_filter(explode('/', str_replace('\\', '/', $targetFolder)), fn ($s) => $s !== '');
+                $destUrl = $baseHost . '/' . ($targetFolder ? implode('/', array_map('rawurlencode', $folderSegments)) . '/' : '') . rawurlencode($transfer->file_name);
+
+                $chDel = curl_init($destUrl);
+                curl_setopt($chDel, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
+                curl_setopt($chDel, CURLOPT_CUSTOMREQUEST, 'DELETE');
+                curl_setopt($chDel, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($chDel, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($chDel, CURLOPT_SSL_VERIFYHOST, false);
+                curl_setopt($chDel, CURLOPT_TIMEOUT, 5);
+                curl_exec($chDel);
+                curl_close($chDel);
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Could not cleanup partial files for transfer #{$transfer->id}: " . $e->getMessage());
+        }
     }
 }

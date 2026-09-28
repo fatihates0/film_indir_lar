@@ -77,6 +77,7 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
     Route::post('/storage-boxes/remote-transfer', [StorageBoxAdminController::class, 'startRemoteTransfer'])->name('storage-boxes.remote-transfer');
     Route::post('/storage-boxes/bulk-remote-transfer', [StorageBoxAdminController::class, 'startBulkRemoteTransfer'])->name('storage-boxes.bulk-remote-transfer');
     Route::get('/storage-boxes/transfers', [StorageBoxAdminController::class, 'getTransfers'])->name('storage-boxes.transfers');
+    Route::post('/storage-boxes/transfers/bulk-cancel', [StorageBoxAdminController::class, 'bulkCancelTransfers'])->name('storage-boxes.transfers.bulk-cancel');
     Route::post('/storage-boxes/transfers/bulk-delete', [StorageBoxAdminController::class, 'bulkDeleteTransfers'])->name('storage-boxes.transfers.bulk-delete');
     Route::delete('/storage-boxes/transfers/{transfer}', [StorageBoxAdminController::class, 'cancelTransfer'])->name('storage-boxes.cancel-transfer');
 });

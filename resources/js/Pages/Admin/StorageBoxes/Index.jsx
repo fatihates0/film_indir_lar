@@ -178,9 +178,43 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
         }
     };
 
+    const activeSelectedTransfers = transfers.filter(
+        t => selectedTransferIds.includes(t.id) && (t.status === 'pending' || t.status === 'transferring')
+    );
+
+    const handleBulkCancel = async () => {
+        const activeIds = activeSelectedTransfers.map(t => t.id);
+        if (activeIds.length === 0) {
+            alert('Seçilenler arasında çalışan veya kuyrukta bekleyen aktif işlem bulunmuyor.');
+            return;
+        }
+
+        if (!confirm(`Seçilen ${activeIds.length} adet aktif aktarımı durdurup iptal etmek istediğinize emin misiniz?`)) {
+            return;
+        }
+
+        setIsBulkDeleting(true);
+        try {
+            await axios.post(route('admin.storage-boxes.transfers.bulk-cancel'), {
+                ids: activeIds
+            });
+            fetchTransfers(currentPage);
+        } catch (err) {
+            alert('İptal işlemi başarısız: ' + (err.response?.data?.message || err.message));
+        } finally {
+            setIsBulkDeleting(false);
+        }
+    };
+
     const handleBulkDelete = async () => {
         if (selectedTransferIds.length === 0) return;
-        if (!confirm(`Seçili ${selectedTransferIds.length} adet aktarım kaydını silmek istediğinize emin misiniz? (Aktif indirmeler iptal edilecektir)`)) {
+
+        let confirmMsg = `Seçili ${selectedTransferIds.length} adet aktarım kaydını silmek istediğinize emin misiniz?`;
+        if (activeSelectedTransfers.length > 0) {
+            confirmMsg = `Seçilen ${selectedTransferIds.length} aktarımdan ${activeSelectedTransfers.length} tanesi şu anda AKTİF ÇALIŞIYOR / KUYRUKTA.\n\nİlk önce çalışan indirmeler güvenle durdurulup iptal edilecek, ardından tüm seçilen kayıtlar silinecektir.\n\nDevam etmek istiyor musunuz?`;
+        }
+
+        if (!confirm(confirmMsg)) {
             return;
         }
 
@@ -468,13 +502,18 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                     {/* Bulk Selection Action Bar */}
                     {selectedTransferIds.length > 0 && (
                         <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-200 animate-fadeIn">
-                            <div className="flex items-center gap-2.5 text-xs font-medium">
+                            <div className="flex items-center gap-2.5 text-xs font-medium flex-wrap">
                                 <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[11px] font-bold">
                                     {selectedTransferIds.length}
                                 </span>
-                                <span>adet işlem seçildi</span>
+                                <span>kayıt seçildi</span>
+                                {activeSelectedTransfers.length > 0 && (
+                                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold animate-pulse">
+                                        ⚡ {activeSelectedTransfers.length} aktif işlem
+                                    </span>
+                                )}
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                                 <button
                                     type="button"
                                     onClick={() => setSelectedTransferIds([])}
@@ -482,14 +521,31 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                                 >
                                     Seçimi Kaldır
                                 </button>
+                                {activeSelectedTransfers.length > 0 && (
+                                    <button
+                                        type="button"
+                                        disabled={isBulkDeleting}
+                                        onClick={handleBulkCancel}
+                                        className="px-3.5 py-1.5 rounded-xl bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-bold shadow-lg shadow-amber-600/30 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                                        title="Seçilen aktif indirmeleri durdurur fakat kayıtlarını korur"
+                                    >
+                                        <span>⏹</span>
+                                        <span>Çalışanları İptal Et ({activeSelectedTransfers.length})</span>
+                                    </button>
+                                )}
                                 <button
                                     type="button"
                                     disabled={isBulkDeleting}
                                     onClick={handleBulkDelete}
                                     className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                                    title={activeSelectedTransfers.length > 0 ? 'Önce çalışanları durdurur, ardından tüm seçilenleri siler' : 'Seçilenleri sil'}
                                 >
                                     <span>🗑</span>
-                                    <span>{isBulkDeleting ? 'Siliniyor...' : `Seçilenleri Sil (${selectedTransferIds.length})`}</span>
+                                    <span>
+                                        {isBulkDeleting
+                                            ? (activeSelectedTransfers.length > 0 ? 'Durduruluyor & Siliniyor...' : 'Siliniyor...')
+                                            : `Seçilenleri Sil (${selectedTransferIds.length})`}
+                                    </span>
                                 </button>
                             </div>
                         </div>
