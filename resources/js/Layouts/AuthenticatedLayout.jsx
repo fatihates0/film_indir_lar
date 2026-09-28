@@ -61,6 +61,13 @@ export default function AuthenticatedLayout({ header, children }) {
                                         >
                                             Storage Box'lar
                                         </NavLink>
+                                        <NavLink
+                                            href={route('admin.jellyfin.index')}
+                                            active={route().current('admin.jellyfin.*')}
+                                            className="text-slate-300 hover:text-white font-medium"
+                                        >
+                                            Jellyfin
+                                        </NavLink>
                                     </>
                                 )}
                             </div>

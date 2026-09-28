@@ -9,6 +9,7 @@ use App\Models\PlexUsageSession;
 use App\Models\QuotaUsageRecord;
 use App\Models\User;
 use App\Models\UserQuota;
+use App\Services\JellyfinService;
 use App\Services\PlexService;
 use App\Services\StorageBoxService;
 use Inertia\Inertia;
@@ -16,7 +17,7 @@ use Inertia\Response;
 
 class AdminDashboardController extends Controller
 {
-    public function index(PlexService $plexService, StorageBoxService $storageBoxService): Response
+    public function index(PlexService $plexService, StorageBoxService $storageBoxService, JellyfinService $jellyfinService): Response
     {
         $totalUsers = User::count();
         $activeUsers = User::where('status', 'active')->count();
@@ -40,6 +41,7 @@ class AdminDashboardController extends Controller
 
         $plexStatus = $plexService->getStatus();
         $storageBoxMounted = $storageBoxService->isMounted();
+        $jellyfinStatus = $jellyfinService->getStatus();
 
         return Inertia::render('Admin/Dashboard', [
             'stats' => [
@@ -58,6 +60,9 @@ class AdminDashboardController extends Controller
                 'storage_box' => $storageBoxMounted ? 'ONLINE' : 'OFFLINE',
                 'plex' => $plexStatus['online'] ? 'ONLINE' : 'OFFLINE',
                 'plex_version' => $plexStatus['version'] ?? null,
+                'jellyfin' => $jellyfinStatus['online'] ? 'ONLINE' : 'OFFLINE',
+                'jellyfin_version' => $jellyfinStatus['version'] ?? null,
+                'jellyfin_configured' => $jellyfinStatus['configured'] ?? false,
             ],
         ]);
     }

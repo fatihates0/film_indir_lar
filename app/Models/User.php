@@ -23,6 +23,7 @@ class User extends Authenticatable
         'status',
         'download_enabled',
         'plex_enabled',
+        'jellyfin_enabled',
         'max_concurrent_downloads',
         'quota_plan_id',
     ];
@@ -41,6 +42,7 @@ class User extends Authenticatable
             'status' => UserStatus::class,
             'download_enabled' => 'boolean',
             'plex_enabled' => 'boolean',
+            'jellyfin_enabled' => 'boolean',
             'max_concurrent_downloads' => 'integer',
         ];
     }
@@ -83,6 +85,16 @@ class User extends Authenticatable
     public function plexAccounts(): HasMany
     {
         return $this->hasMany(PlexAccount::class);
+    }
+
+    public function jellyfinAccounts(): HasMany
+    {
+        return $this->hasMany(JellyfinAccount::class);
+    }
+
+    public function jellyfinAccount(): HasOne
+    {
+        return $this->hasOne(JellyfinAccount::class);
     }
 
     public function plexUsageSessions(): HasMany

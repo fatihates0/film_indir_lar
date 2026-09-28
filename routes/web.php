@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\JellyfinAdminController;
 use App\Http\Controllers\Admin\MediaAdminController;
 use App\Http\Controllers\Admin\StorageBoxAdminController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
@@ -80,6 +81,13 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
     Route::post('/storage-boxes/transfers/bulk-cancel', [StorageBoxAdminController::class, 'bulkCancelTransfers'])->name('storage-boxes.transfers.bulk-cancel');
     Route::post('/storage-boxes/transfers/bulk-delete', [StorageBoxAdminController::class, 'bulkDeleteTransfers'])->name('storage-boxes.transfers.bulk-delete');
     Route::delete('/storage-boxes/transfers/{transfer}', [StorageBoxAdminController::class, 'cancelTransfer'])->name('storage-boxes.cancel-transfer');
+
+    // Jellyfin User Management
+    Route::get('/jellyfin', [JellyfinAdminController::class, 'index'])->name('jellyfin.index');
+    Route::post('/jellyfin/users', [JellyfinAdminController::class, 'store'])->name('jellyfin.users.store');
+    Route::delete('/jellyfin/users/{jellyfin_user_id}', [JellyfinAdminController::class, 'destroy'])->name('jellyfin.users.destroy');
+    Route::patch('/jellyfin/users/{jellyfin_user_id}/password', [JellyfinAdminController::class, 'updatePassword'])->name('jellyfin.users.password');
+    Route::post('/jellyfin/sync', [JellyfinAdminController::class, 'sync'])->name('jellyfin.sync');
 });
 
 require __DIR__.'/auth.php';
