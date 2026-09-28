@@ -778,9 +778,8 @@ class StorageBoxAdminController extends Controller
             $this->remoteTransferService->cancelTransfer($transfer);
         }
 
-        // 2. Ardından tüm seçilen kayıtları dosyalarını da temizleyerek sil
+        // 2. Ardından tüm seçilen kayıtları veritabanı kuyruğundan sil (tamamlanmış dosyalar ASLA silinmez)
         foreach ($transfers as $transfer) {
-            $this->remoteTransferService->cleanupPartialFiles($transfer);
             $transfer->delete();
         }
 
@@ -825,7 +824,7 @@ class StorageBoxAdminController extends Controller
         if (in_array($transfer->status, ['pending', 'transferring'])) {
             $this->remoteTransferService->cancelTransfer($transfer);
         } else {
-            $this->remoteTransferService->cleanupPartialFiles($transfer);
+            // Tamamlanmış veya eski transfer kaydı: SADECE kuyruk logunu sil, yüklenen dosyaya KESİNLİKLE dokunma!
             $transfer->delete();
         }
 

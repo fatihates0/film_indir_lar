@@ -604,10 +604,15 @@ class RemoteTransferService
     }
 
     /**
-     * Remove partial file from local mount or WebDAV.
+     * Remove partial file from local mount or WebDAV (only for cancelled or failed transfers, NEVER completed).
      */
     public function cleanupPartialFiles(RemoteTransfer $transfer): void
     {
+        // ASLA tamamlanmış dosyayı silme! Sadece yarıda kalan/iptal edilen geçici dosyalar temizlenir.
+        if ($transfer->status === 'completed') {
+            return;
+        }
+
         $storageBox = $transfer->storageBox;
         if (! $storageBox) {
             return;

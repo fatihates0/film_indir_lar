@@ -152,7 +152,13 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
     };
 
     const handleCancelTransfer = (id) => {
-        if (confirm('Bu transfer işlemini iptal etmek/silmek istediğinize emin misiniz?')) {
+        const item = transfers.find(t => t.id === id);
+        const isActive = item && (item.status === 'pending' || item.status === 'transferring');
+        const confirmMsg = isActive
+            ? 'Bu devam eden transfer işlemini durdurup iptal etmek istediğinize emin misiniz?'
+            : 'Bu transfer kaydını kuyruk listesinden silmek istediğinize emin misiniz? (Storage Box\'a yüklenmiş film/dizi dosyası KESİNLİKLE silinmez)';
+
+        if (confirm(confirmMsg)) {
             axios.delete(route('admin.storage-boxes.cancel-transfer', id)).then(() => {
                 setSelectedTransferIds(prev => prev.filter(tid => tid !== id));
                 fetchTransfers(currentPage);
@@ -209,9 +215,9 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
     const handleBulkDelete = async () => {
         if (selectedTransferIds.length === 0) return;
 
-        let confirmMsg = `Seçili ${selectedTransferIds.length} adet aktarım kaydını silmek istediğinize emin misiniz?`;
+        let confirmMsg = `Seçili ${selectedTransferIds.length} adet aktarım kaydı kuyruk listesinden silinecektir. (Yüklenmiş dosyalarınız KESİNLİKLE silinmez)`;
         if (activeSelectedTransfers.length > 0) {
-            confirmMsg = `Seçilen ${selectedTransferIds.length} aktarımdan ${activeSelectedTransfers.length} tanesi şu anda AKTİF ÇALIŞIYOR / KUYRUKTA.\n\nİlk önce çalışan indirmeler güvenle durdurulup iptal edilecek, ardından tüm seçilen kayıtlar silinecektir.\n\nDevam etmek istiyor musunuz?`;
+            confirmMsg = `Seçilen ${selectedTransferIds.length} aktarımdan ${activeSelectedTransfers.length} tanesi şu anda AKTİF ÇALIŞIYOR / KUYRUKTA.\n\nİlk önce çalışan indirmeler güvenle durdurulup iptal edilecek, ardından kuyruk kayıtları temizlenecektir. (Tamamlanmış dosyalar KESİNLİKLE silinmez)\n\nDevam etmek istiyor musunuz?`;
         }
 
         if (!confirm(confirmMsg)) {
@@ -242,7 +248,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
             return;
         }
 
-        if (!confirm(`Bu sayfadaki ${completedIds.length} adet tamamlanmış/hatalı aktarım kaydı silinsin mi?`)) {
+        if (!confirm(`Bu sayfadaki ${completedIds.length} adet tamamlanmış aktarım kaydı kuyruk listesinden silinsin mi? (Storage Box'taki film/dizi dosyalarınız KESİNLİKLE silinmez)`)) {
             return;
         }
 
