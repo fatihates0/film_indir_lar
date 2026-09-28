@@ -221,3 +221,98 @@ test('admin can upload to random storage box with space check and fallback', fun
     ]);
 });
 
+test('duplicate file with same name and matching size is marked as completed without transferring', function () {
+    // Create an existing completed transfer
+    RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/existing.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'existing.mkv',
+        'relative_path' => 'Filmler/existing.mkv',
+        'total_bytes' => 5000000,
+        'transferred_bytes' => 5000000,
+        'progress_percent' => 100.00,
+        'status' => 'completed',
+    ]);
+
+    // Mock probeUrl on RemoteTransferService to return the same size
+    $mockService = Mockery::mock(
+        \App\Services\RemoteTransferService::class,
+        [app(\App\Services\StorageBoxService::class), app(\App\Services\AuditLogService::class)]
+    )->makePartial();
+    $mockService->shouldReceive('probeUrl')->andReturn([
+        'success' => true,
+        'file_name' => 'existing.mkv',
+        'file_size' => 5000000,
+        'suggested_type' => 'movie',
+        'suggested_title' => 'Existing',
+        'suggested_year' => null,
+        'suggested_folder' => 'Filmler',
+    ]);
+    app()->instance(\App\Services\RemoteTransferService::class, $mockService);
+
+    Queue::fake();
+
+    $response = $this->actingAs($this->admin)->post(route('admin.storage-boxes.remote-transfer'), [
+        'source_url' => 'https://example.com/existing.mkv',
+        'storage_box_id' => $this->box->id,
+        'target_folder' => 'Filmler',
+        'file_name' => 'existing.mkv',
+        'auto_add_media' => false,
+    ]);
+
+    $response->assertRedirect();
+
+    // The new transfer should be created directly with completed status
+    $latest = RemoteTransfer::latest('id')->first();
+    expect($latest->status)->toBe('completed')
+        ->and($latest->progress_percent)->toBe(100.00)
+        ->and($latest->transferred_bytes)->toBe(5000000);
+
+    // No job should have been dispatched to perform transfer
+    Queue::assertNothingPushed();
+});
+
+test('remote transfer respects concurrency limit from config and env', function () {
+    config(['storagebox.max_concurrent_transfers' => 2]);
+
+    $service = app(\App\Services\RemoteTransferService::class);
+    expect($service->getMaxConcurrency())->toBe(2);
+
+    // Create 2 active transferring items
+    RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/active1.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'active1.mkv',
+        'relative_path' => 'Filmler/active1.mkv',
+        'status' => 'transferring',
+    ]);
+    RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/active2.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'active2.mkv',
+        'relative_path' => 'Filmler/active2.mkv',
+        'status' => 'transferring',
+    ]);
+
+    // Active count should be 2
+    expect($service->getActiveTransfersCount())->toBe(2);
+
+    // ProcessQueue should not start any new pending transfers when slots are full
+    $pending = RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/pending.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'pending.mkv',
+        'relative_path' => 'Filmler/pending.mkv',
+        'status' => 'pending',
+    ]);
+
+    $started = $service->processQueue();
+    expect($started)->toBe(0)
+        ->and($pending->fresh()->status)->toBe('pending');
+});
+
+

@@ -21,7 +21,23 @@ class ProcessRemoteTransferJob implements ShouldQueue
 
     public function handle(RemoteTransferService $transferService): void
     {
+        $transfer = $this->transfer->fresh();
+        if (! $transfer || in_array($transfer->status, ['cancelled', 'completed'])) {
+            return;
+        }
+
+        $maxConcurrent = $transferService->getMaxConcurrency();
+        $activeCount = RemoteTransfer::where('status', 'transferring')
+            ->where('id', '!=', $transfer->id)
+            ->count();
+
+        if ($activeCount >= $maxConcurrent) {
+            Log::info("ProcessRemoteTransferJob: Concurrency limit ({$maxConcurrent}) reached (active: {$activeCount}). Releasing transfer #{$transfer->id} back to queue.");
+            $this->release(5);
+            return;
+        }
+
         Log::info("ProcessRemoteTransferJob started for transfer #{$this->transfer->id}");
-        $transferService->executeTransfer($this->transfer);
+        $transferService->executeTransfer($transfer);
     }
 }

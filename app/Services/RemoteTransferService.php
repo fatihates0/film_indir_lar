@@ -137,6 +137,36 @@ class RemoteTransferService
                 // Select target storage box (random with space check if random/null requested)
                 $targetBox = $this->selectStorageBox($storageBox, $fileSize);
 
+                // Check if identical file with same name and same size already exists on target storage box
+                $existingSize = ($fileSize > 0)
+                    ? $this->getExistingFileMatchingSize($targetBox, $folder, $fileName, $fileSize)
+                    : null;
+
+                if ($existingSize !== null) {
+                    Log::info("Bulk transfer: '{$fileName}' hedefte ({$targetBox->name}) aynı boyutta ({$existingSize} B) zaten mevcut, yüklendi olarak işaretlendi.");
+                    $transfer = RemoteTransfer::create([
+                        'storage_box_id' => $targetBox->id,
+                        'source_url' => $url,
+                        'target_folder' => $folder,
+                        'file_name' => $fileName,
+                        'relative_path' => $relativePath,
+                        'total_bytes' => $fileSize,
+                        'transferred_bytes' => $fileSize,
+                        'progress_percent' => 100.00,
+                        'speed_bps' => 0,
+                        'status' => 'completed',
+                        'auto_add_media' => $autoAddMedia,
+                        'error_message' => 'Dosya hedef Storage Box üzerinde aynı isim ve boyutta zaten mevcut. Yeniden aktarılmadı.',
+                    ]);
+
+                    if ($autoAddMedia) {
+                        $this->registerMedia($transfer, $targetBox);
+                    }
+
+                    $queued[] = $transfer;
+                    continue;
+                }
+
                 $transfer = RemoteTransfer::create([
                     'storage_box_id' => $targetBox->id,
                     'source_url' => $url,
@@ -191,11 +221,6 @@ class RemoteTransferService
             return false;
         }
 
-        $transfer->update([
-            'status' => 'transferring',
-            'error_message' => null,
-        ]);
-
         $storageBox = $transfer->storageBox;
         if (! $storageBox) {
             $transfer->update([
@@ -205,6 +230,39 @@ class RemoteTransferService
 
             return false;
         }
+
+        // Check if identical file with same name and same size already exists on target storage box
+        if ($transfer->total_bytes > 0) {
+            $existingSize = $this->getExistingFileMatchingSize(
+                $storageBox,
+                $transfer->target_folder,
+                $transfer->file_name,
+                $transfer->total_bytes
+            );
+
+            if ($existingSize !== null) {
+                Log::info("RemoteTransfer #{$transfer->id} ({$transfer->file_name}): Aynı isim ve boyutta ({$existingSize} B) dosya hedefte mevcut. Yüklendi olarak işaretlendi.");
+                $transfer->update([
+                    'status' => 'completed',
+                    'progress_percent' => 100.00,
+                    'transferred_bytes' => $transfer->total_bytes,
+                    'speed_bps' => 0,
+                    'error_message' => 'Dosya hedef Storage Box üzerinde aynı isim ve boyutta zaten mevcut. Yeniden aktarılmadı.',
+                ]);
+
+                if ($transfer->auto_add_media) {
+                    $this->registerMedia($transfer, $storageBox);
+                }
+
+                $this->processQueue();
+                return true;
+            }
+        }
+
+        $transfer->update([
+            'status' => 'transferring',
+            'error_message' => null,
+        ]);
 
         // Automatic Space Protection: If current storage box is out of space, redirect to next available one!
         if ($transfer->total_bytes > 0 && ! $this->hasAvailableSpace($storageBox, $transfer->total_bytes)) {
@@ -241,6 +299,7 @@ class RemoteTransferService
             $freshStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
             if ($freshStatus === null || $freshStatus === 'cancelled') {
                 $this->cleanupPartialFiles($transfer);
+                $this->processQueue();
                 return false;
             }
 
@@ -268,11 +327,14 @@ class RemoteTransferService
                 ]
             );
 
+            $this->processQueue();
+
             return true;
         } catch (Exception $e) {
             $freshStatus = RemoteTransfer::where('id', $transfer->id)->value('status');
             if ($freshStatus === null || $freshStatus === 'cancelled') {
                 $this->cleanupPartialFiles($transfer);
+                $this->processQueue();
                 return false;
             }
 
@@ -286,6 +348,8 @@ class RemoteTransferService
                 'error_message' => $e->getMessage(),
                 'speed_bps' => 0,
             ]);
+
+            $this->processQueue();
 
             return false;
         }
@@ -511,7 +575,7 @@ class RemoteTransferService
     /**
      * Automatically register newly transferred file to Laravel media database.
      */
-    protected function registerMedia(RemoteTransfer $transfer, StorageBox $storageBox): void
+    public function registerMedia(RemoteTransfer $transfer, StorageBox $storageBox): void
     {
         $relativePath = trim($transfer->relative_path, '/\\');
         $fileName = $transfer->file_name;
@@ -760,5 +824,125 @@ class RemoteTransferService
         $needed = $requiredBytes > 0 ? ($requiredBytes + $buffer) : $buffer;
 
         return $available >= $needed;
+    }
+
+    /**
+     * Check if a file with the exact same name and size already exists on target Storage Box.
+     * Returns the existing size if matched, or null if not found or sizes differ.
+     */
+    public function getExistingFileMatchingSize(StorageBox $storageBox, string $targetFolder, string $fileName, int $expectedSize): ?int
+    {
+        if ($expectedSize <= 0) {
+            return null;
+        }
+
+        $targetFolder = trim($targetFolder, '/\\');
+        $relativePath = ($targetFolder ? $targetFolder . '/' : '') . $fileName;
+
+        // 1. Check local mount path if accessible
+        if (! empty($storageBox->mount_path)) {
+            $fullPath = rtrim($storageBox->mount_path, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+            if (file_exists($fullPath) && is_file($fullPath)) {
+                $existingSize = @filesize($fullPath);
+                if ($existingSize !== false && (int) $existingSize === (int) $expectedSize) {
+                    return (int) $existingSize;
+                }
+            }
+        }
+
+        // 2. Check via remote WebDAV / FTP if local mount not accessible
+        if (! empty($storageBox->host) && ! empty($storageBox->username)) {
+            try {
+                $remoteSize = $this->storageBoxService->fetchRemoteFileSize($relativePath, $storageBox);
+                if ($remoteSize > 0 && (int) $remoteSize === (int) $expectedSize) {
+                    return (int) $remoteSize;
+                }
+            } catch (Exception $e) {
+                // Ignore remote inspection errors
+            }
+        }
+
+        // 3. Check Media table
+        $existingMedia = Media::where('storage_box_id', $storageBox->id)
+            ->where(function ($q) use ($fileName, $relativePath) {
+                $q->where('file_name', $fileName)
+                    ->orWhere('file_path', $relativePath);
+            })
+            ->first();
+        if ($existingMedia && (int) $existingMedia->file_size === (int) $expectedSize) {
+            return (int) $existingMedia->file_size;
+        }
+
+        // 4. Check completed RemoteTransfer table
+        $existingTransfer = RemoteTransfer::where('storage_box_id', $storageBox->id)
+            ->where('file_name', $fileName)
+            ->where('target_folder', $targetFolder ?: 'Filmler')
+            ->where('status', 'completed')
+            ->first();
+        if ($existingTransfer && (int) $existingTransfer->total_bytes === (int) $expectedSize) {
+            return (int) $existingTransfer->total_bytes;
+        }
+
+        return null;
+    }
+
+    /**
+     * Get maximum concurrent remote transfers allowed from config/.env.
+     */
+    public function getMaxConcurrency(): int
+    {
+        $limit = (int) config('storagebox.max_concurrent_transfers', env('REMOTE_TRANSFER_CONCURRENCY', 3));
+        return max(1, $limit);
+    }
+
+    /**
+     * Get count of transfers currently active (transferring).
+     */
+    public function getActiveTransfersCount(): int
+    {
+        return RemoteTransfer::where('status', 'transferring')->count();
+    }
+
+    /**
+     * Process pending remote transfers up to configured concurrency limit.
+     */
+    public function processQueue(): int
+    {
+        $maxConcurrent = $this->getMaxConcurrency();
+        $activeCount = $this->getActiveTransfersCount();
+        $slotsAvailable = max(0, $maxConcurrent - $activeCount);
+
+        if ($slotsAvailable <= 0) {
+            return 0;
+        }
+
+        $pendingTransfers = RemoteTransfer::where('status', 'pending')
+            ->orderBy('id', 'asc')
+            ->limit($slotsAvailable)
+            ->get();
+
+        $started = 0;
+        foreach ($pendingTransfers as $transfer) {
+            $this->spawnTransferProcess($transfer);
+            $started++;
+        }
+
+        return $started;
+    }
+
+    /**
+     * Spawn background CLI process to execute transfer without blocking HTTP request.
+     */
+    public function spawnTransferProcess(RemoteTransfer $transfer): void
+    {
+        $phpBinary = PHP_BINARY ?: 'php';
+        $artisan = base_path('artisan');
+        $cmd = "\"{$phpBinary}\" \"{$artisan}\" storagebox:transfer-run {$transfer->id}";
+
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            @pclose(@popen("start /B {$cmd}", 'r'));
+        } else {
+            @exec("{$cmd} > /dev/null 2>&1 &");
+        }
     }
 }

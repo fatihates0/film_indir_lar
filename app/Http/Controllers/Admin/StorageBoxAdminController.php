@@ -773,6 +773,46 @@ class StorageBoxAdminController extends Controller
 
         $relativePath = ($folder ? $folder . '/' : '') . $fileName;
 
+        // Check if identical file with same name and same size already exists
+        $existingSize = ($totalBytes > 0)
+            ? $this->remoteTransferService->getExistingFileMatchingSize($storageBox, $folder, $fileName, $totalBytes)
+            : null;
+
+        if ($existingSize !== null) {
+            $autoAdd = $request->boolean('auto_add_media', true);
+            $transfer = RemoteTransfer::create([
+                'storage_box_id' => $storageBox->id,
+                'source_url' => $validated['source_url'],
+                'target_folder' => $folder ?: 'Filmler',
+                'file_name' => $fileName,
+                'relative_path' => $relativePath,
+                'total_bytes' => $totalBytes,
+                'transferred_bytes' => $totalBytes,
+                'progress_percent' => 100.00,
+                'speed_bps' => 0,
+                'status' => 'completed',
+                'auto_add_media' => $autoAdd,
+                'error_message' => 'Dosya hedef Storage Box üzerinde aynı isim ve boyutta zaten mevcut. Yeniden aktarılmadı.',
+            ]);
+
+            if ($autoAdd) {
+                $this->remoteTransferService->registerMedia($transfer, $storageBox);
+            }
+
+            $this->auditLogService->log(
+                action: 'remote_transfer_skipped_duplicate',
+                targetType: 'RemoteTransfer',
+                targetId: (string) $transfer->id,
+                newValues: $transfer->toArray()
+            );
+
+            return back()->with('message', sprintf(
+                '"%s" adlı dosya (%s) hedef depolama alanında aynı boyutta zaten mevcut olduğu için doğrudan yüklendi olarak işaretlendi.',
+                $fileName,
+                $this->remoteTransferService->formatBytes($totalBytes)
+            ));
+        }
+
         $transfer = RemoteTransfer::create([
             'storage_box_id' => $storageBox->id,
             'source_url' => $validated['source_url'],
@@ -787,8 +827,9 @@ class StorageBoxAdminController extends Controller
             'auto_add_media' => $request->boolean('auto_add_media', true),
         ]);
 
-        // Dispatch background worker job
+        // Dispatch background worker job and spawn runner if queue slots available
         ProcessRemoteTransferJob::dispatch($transfer);
+        $this->remoteTransferService->processQueue();
 
         $this->auditLogService->log(
             action: 'remote_transfer_started',
@@ -829,6 +870,9 @@ class StorageBoxAdminController extends Controller
             autoAddMedia: $request->boolean('auto_add_media', true)
         );
 
+        // Advance queue processes
+        $this->remoteTransferService->processQueue();
+
         if ($result['queued'] === 0) {
             return back()->with('message', 'Geçerli bir URL bulunamadı veya aktarıma uygun link tespit edilemedi.');
         }
@@ -847,6 +891,11 @@ class StorageBoxAdminController extends Controller
      */
     public function getTransfers(Request $request): JsonResponse
     {
+        // Advance queue if there are pending transfers
+        if (RemoteTransfer::where('status', 'pending')->exists()) {
+            $this->remoteTransferService->processQueue();
+        }
+
         $perPage = (int) $request->input('per_page', 10);
         $paginated = RemoteTransfer::with('storageBox')
             ->latest()
