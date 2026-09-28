@@ -15,12 +15,20 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
     const [transfers, setTransfers] = useState(recent_transfers);
     const [probing, setProbing] = useState(false);
     const [probeResult, setProbeResult] = useState(null);
+    const [uploadTab, setUploadTab] = useState('single'); // 'single' | 'bulk'
 
     const remoteForm = useForm({
         source_url: '',
         storage_box_id: boxes.length > 0 ? boxes[0].id : '',
         target_folder: 'Filmler',
         file_name: '',
+        auto_add_media: true,
+    });
+
+    const bulkForm = useForm({
+        urls: '',
+        storage_box_id: boxes.length > 0 ? boxes[0].id : '',
+        target_folder: 'Filmler',
         auto_add_media: true,
     });
 
@@ -110,6 +118,19 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
         });
     };
 
+    const handleBulkSubmit = (e) => {
+        e.preventDefault();
+        bulkForm.post(route('admin.storage-boxes.bulk-remote-transfer'), {
+            onSuccess: () => {
+                setRemoteModalOpen(false);
+                bulkForm.reset();
+                axios.get(route('admin.storage-boxes.transfers')).then(res => {
+                    if (res.data?.transfers) setTransfers(res.data.transfers);
+                });
+            }
+        });
+    };
+
     const handleCancelTransfer = (id) => {
         if (confirm('Bu transfer işlemini iptal etmek/silmek istediğinize emin misiniz?')) {
             axios.delete(route('admin.storage-boxes.cancel-transfer', id)).then(() => {
@@ -120,6 +141,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
 
     const openRemoteModalForBox = (box) => {
         remoteForm.setData(prev => ({ ...prev, storage_box_id: box.id }));
+        bulkForm.setData(prev => ({ ...prev, storage_box_id: box.id }));
         setRemoteModalOpen(true);
     };
 
@@ -799,115 +821,227 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                                         <span className="text-emerald-400">☁</span> URL'den İndir & Storage Box'a Yükle
                                     </h3>
-                                    <p className="text-xs text-slate-400 mt-1">Harici bir web indirme linkini (örneğin uhdfilmindir.com) doğrudan Storage Box'a aktarın.</p>
+                                    <p className="text-xs text-slate-400 mt-1">Harici bir web indirme linkini doğrudan Storage Box'a aktarın.</p>
                                 </div>
                                 <button onClick={() => setRemoteModalOpen(false)} className="text-slate-400 hover:text-white font-bold text-lg">&times;</button>
                             </div>
 
-                            <form onSubmit={handleRemoteSubmit} className="space-y-4 text-xs">
-                                <div>
-                                    <label className="block font-semibold text-slate-300 mb-1">Kaynak İndirme Linki (URL)</label>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="url"
-                                            value={remoteForm.data.source_url}
-                                            onChange={(e) => remoteForm.setData('source_url', e.target.value)}
-                                            className="flex-1 rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-emerald-500 focus:ring-emerald-500 text-xs"
-                                            placeholder="https://cloud.uhdfilmindir.com/..."
-                                            required
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={handleProbeUrl}
-                                            disabled={probing || !remoteForm.data.source_url}
-                                            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
-                                        >
-                                            {probing ? 'Taranıyor...' : 'Algıla'}
-                                        </button>
-                                    </div>
-                                    <span className="text-[11px] text-slate-500 mt-1 block">"Algıla" butonuna basarak dosya adı ve boyutunu linkten otomatik çekebilirsiniz.</span>
-                                </div>
+                            {/* Mode Tabs */}
+                            <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setUploadTab('single')}
+                                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                                        uploadTab === 'single'
+                                            ? 'bg-emerald-600 text-white shadow'
+                                            : 'text-slate-400 hover:text-white'
+                                    }`}
+                                >
+                                    Tek Link İndir
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setUploadTab('bulk')}
+                                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                                        uploadTab === 'bulk'
+                                            ? 'bg-emerald-600 text-white shadow'
+                                            : 'text-slate-400 hover:text-white'
+                                    }`}
+                                >
+                                    Toplu Link Ekle (Çoklu İndirme)
+                                </button>
+                            </div>
 
-                                {probeResult && (
-                                    <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3.5 space-y-1.5 font-mono text-xs">
-                                        <div className="text-emerald-300 font-bold">✓ Dosya Bilgileri Tespit Edildi:</div>
-                                        <div className="text-slate-300">Boyut: <strong className="text-white">{probeResult.file_size_formatted}</strong></div>
-                                        <div className="text-slate-300">Önerilen Tür: <strong className="text-indigo-300 uppercase">{probeResult.suggested_type}</strong></div>
-                                    </div>
-                                )}
-
-                                <div>
-                                    <label className="block font-semibold text-slate-300 mb-1">Kaydedilecek Dosya Adı</label>
-                                    <input
-                                        type="text"
-                                        value={remoteForm.data.file_name}
-                                        onChange={(e) => remoteForm.setData('file_name', e.target.value)}
-                                        className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-emerald-500 focus:ring-emerald-500 text-xs"
-                                        placeholder="Örn: Christy.2025.1080p.WEB-DL.mkv"
-                                        required
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {uploadTab === 'single' ? (
+                                <form onSubmit={handleRemoteSubmit} className="space-y-4 text-xs">
                                     <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Hedef Storage Box</label>
-                                        <select
-                                            value={remoteForm.data.storage_box_id}
-                                            onChange={(e) => remoteForm.setData('storage_box_id', e.target.value)}
-                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
-                                            required
-                                        >
-                                            {boxes.map((b) => (
-                                                <option key={b.id} value={b.id}>
-                                                    {b.name} ({b.host || 'Yerel Mount'})
-                                                </option>
-                                            ))}
-                                        </select>
+                                        <label className="block font-semibold text-slate-300 mb-1">Kaynak İndirme Linki (URL)</label>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="url"
+                                                value={remoteForm.data.source_url}
+                                                onChange={(e) => remoteForm.setData('source_url', e.target.value)}
+                                                className="flex-1 rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-emerald-500 focus:ring-emerald-500 text-xs"
+                                                placeholder="https://cloud.uhdfilmindir.com/..."
+                                                required
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleProbeUrl}
+                                                disabled={probing || !remoteForm.data.source_url}
+                                                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
+                                            >
+                                                {probing ? 'Taranıyor...' : 'Algıla'}
+                                            </button>
+                                        </div>
+                                        <span className="text-[11px] text-slate-500 mt-1 block">"Algıla" butonuna basarak dosya adı ve boyutunu linkten otomatik çekebilirsiniz.</span>
                                     </div>
+
+                                    {probeResult && (
+                                        <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3.5 space-y-1.5 font-mono text-xs">
+                                            <div className="text-emerald-300 font-bold">✓ Dosya Bilgileri Tespit Edildi:</div>
+                                            <div className="text-slate-300">Boyut: <strong className="text-white">{probeResult.file_size_formatted}</strong></div>
+                                            <div className="text-slate-300">Önerilen Tür: <strong className="text-indigo-300 uppercase">{probeResult.suggested_type}</strong></div>
+                                        </div>
+                                    )}
 
                                     <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Hedef Klasör</label>
+                                        <label className="block font-semibold text-slate-300 mb-1">Kaydedilecek Dosya Adı</label>
                                         <input
                                             type="text"
-                                            value={remoteForm.data.target_folder}
-                                            onChange={(e) => remoteForm.setData('target_folder', e.target.value)}
-                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
-                                            placeholder="Filmler veya Diziler/Game of Thrones/Season 01"
+                                            value={remoteForm.data.file_name}
+                                            onChange={(e) => remoteForm.setData('file_name', e.target.value)}
+                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-emerald-500 focus:ring-emerald-500 text-xs"
+                                            placeholder="Örn: Christy.2025.1080p.WEB-DL.mkv"
                                             required
                                         />
                                     </div>
-                                </div>
 
-                                <div className="rounded-xl bg-slate-950/60 p-3 border border-slate-800 flex items-center gap-3">
-                                    <input
-                                        type="checkbox"
-                                        id="auto_add_media"
-                                        checked={remoteForm.data.auto_add_media}
-                                        onChange={(e) => remoteForm.setData('auto_add_media', e.target.checked)}
-                                        className="rounded bg-slate-900 border-slate-700 text-emerald-600 focus:ring-emerald-500"
-                                    />
-                                    <label htmlFor="auto_add_media" className="text-slate-300 cursor-pointer">
-                                        <strong>Medya Kütüphanesine Otomatik Ekle:</strong> Dosya indiğinde doğrudan film/dizi listenize eklensin ve kullanıcılar indirebilsin.
-                                    </label>
-                                </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block font-semibold text-slate-300 mb-1">Hedef Storage Box</label>
+                                            <select
+                                                value={remoteForm.data.storage_box_id}
+                                                onChange={(e) => remoteForm.setData('storage_box_id', e.target.value)}
+                                                className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
+                                                required
+                                            >
+                                                {boxes.map((b) => (
+                                                    <option key={b.id} value={b.id}>
+                                                        {b.name} ({b.host || 'Yerel Mount'})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
 
-                                <div className="pt-4 border-t border-slate-800 flex gap-2">
-                                    <button
-                                        type="submit"
-                                        disabled={remoteForm.processing || !remoteForm.data.file_name}
-                                        className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-105 transition-all disabled:opacity-50"
-                                    >
-                                        {remoteForm.processing ? 'Başlatılıyor...' : '🚀 İndirme & Yüklemeyi Başlat'}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setRemoteModalOpen(false)}
-                                        className="rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white"
-                                    >
-                                        İptal
-                                    </button>
-                                </div>
-                            </form>
+                                        <div>
+                                            <label className="block font-semibold text-slate-300 mb-1">Hedef Klasör</label>
+                                            <input
+                                                type="text"
+                                                value={remoteForm.data.target_folder}
+                                                onChange={(e) => remoteForm.setData('target_folder', e.target.value)}
+                                                className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
+                                                placeholder="Filmler veya Diziler/Game of Thrones/Season 01"
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl bg-slate-950/60 p-3 border border-slate-800 flex items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            id="auto_add_media_single"
+                                            checked={remoteForm.data.auto_add_media}
+                                            onChange={(e) => remoteForm.setData('auto_add_media', e.target.checked)}
+                                            className="rounded bg-slate-900 border-slate-700 text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                        <label htmlFor="auto_add_media_single" className="text-slate-300 cursor-pointer">
+                                            <strong>Medya Kütüphanesine Otomatik Ekle:</strong> Dosya indiğinde doğrudan film/dizi listenize eklensin ve kullanıcılar indirebilsin.
+                                        </label>
+                                    </div>
+
+                                    <div className="pt-4 border-t border-slate-800 flex gap-2">
+                                        <button
+                                            type="submit"
+                                            disabled={remoteForm.processing || !remoteForm.data.file_name}
+                                            className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-105 transition-all disabled:opacity-50"
+                                        >
+                                            {remoteForm.processing ? 'Başlatılıyor...' : '🚀 İndirme & Yüklemeyi Başlat'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRemoteModalOpen(false)}
+                                            className="rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white"
+                                        >
+                                            İptal
+                                        </button>
+                                    </div>
+                                </form>
+                            ) : (
+                                <form onSubmit={handleBulkSubmit} className="space-y-4 text-xs">
+                                    <div>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="block font-semibold text-slate-300">
+                                                İndirme Bağlantıları (Her satıra bir link)
+                                            </label>
+                                            <span className="text-[11px] font-mono text-emerald-400 font-semibold">
+                                                {bulkForm.data.urls.split('\n').filter(l => l.trim().startsWith('http')).length} Link Tespit Edildi
+                                            </span>
+                                        </div>
+                                        <textarea
+                                            rows="7"
+                                            value={bulkForm.data.urls}
+                                            onChange={(e) => bulkForm.setData('urls', e.target.value)}
+                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-emerald-500 focus:ring-emerald-500 text-xs p-3"
+                                            placeholder={`https://cloud.uhdfilmindir.com/link-1\nhttps://cloud.uhdfilmindir.com/link-2\nhttps://cloud.uhdfilmindir.com/link-3`}
+                                            required
+                                        />
+                                        <span className="text-[11px] text-slate-500 mt-1 block">
+                                            İstediğiniz kadar linki alt alta yapıştırın. Sistem tüm linkleri tek tek çözüp sırayla kuyrukta Storage Box'a aktaracaktır.
+                                        </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block font-semibold text-slate-300 mb-1">Hedef Storage Box</label>
+                                            <select
+                                                value={bulkForm.data.storage_box_id}
+                                                onChange={(e) => bulkForm.setData('storage_box_id', e.target.value)}
+                                                className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
+                                                required
+                                            >
+                                                {boxes.map((b) => (
+                                                    <option key={b.id} value={b.id}>
+                                                        {b.name} ({b.host || 'Yerel Mount'})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block font-semibold text-slate-300 mb-1">Hedef Klasör</label>
+                                            <input
+                                                type="text"
+                                                value={bulkForm.data.target_folder}
+                                                onChange={(e) => bulkForm.setData('target_folder', e.target.value)}
+                                                className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500 text-xs"
+                                                placeholder="Filmler (veya 'auto' yazarak otomatik algılatın)"
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl bg-slate-950/60 p-3 border border-slate-800 flex items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            id="auto_add_media_bulk"
+                                            checked={bulkForm.data.auto_add_media}
+                                            onChange={(e) => bulkForm.setData('auto_add_media', e.target.checked)}
+                                            className="rounded bg-slate-900 border-slate-700 text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                        <label htmlFor="auto_add_media_bulk" className="text-slate-300 cursor-pointer">
+                                            <strong>Medya Kütüphanesine Otomatik Ekle:</strong> İndirilen tüm filmler/diziler tamamlandıkça doğrudan sitenize eklensin.
+                                        </label>
+                                    </div>
+
+                                    <div className="pt-4 border-t border-slate-800 flex gap-2">
+                                        <button
+                                            type="submit"
+                                            disabled={bulkForm.processing || !bulkForm.data.urls.trim()}
+                                            className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-105 transition-all disabled:opacity-50"
+                                        >
+                                            {bulkForm.processing ? 'Kuyruğa Ekleniyor...' : '🚀 Toplu İndirmeleri Kuyruğa Ekle'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRemoteModalOpen(false)}
+                                            className="rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white"
+                                        >
+                                            İptal
+                                        </button>
+                                    </div>
+                                </form>
+                            )}
                         </div>
                     </div>
                 )}

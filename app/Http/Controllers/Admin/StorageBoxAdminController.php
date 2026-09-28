@@ -666,6 +666,39 @@ class StorageBoxAdminController extends Controller
     }
 
     /**
+     * Start bulk remote file transfer jobs into chosen Storage Box.
+     */
+    public function startBulkRemoteTransfer(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'urls' => ['required', 'string'],
+            'storage_box_id' => ['required', 'exists:storage_boxes,id'],
+            'target_folder' => ['nullable', 'string', 'max:255'],
+            'auto_add_media' => ['nullable', 'boolean'],
+        ]);
+
+        $storageBox = StorageBox::findOrFail($validated['storage_box_id']);
+        $folder = trim($validated['target_folder'] ?? 'Filmler', '/\\');
+
+        $result = $this->remoteTransferService->createBulkTransfers(
+            rawUrls: $validated['urls'],
+            storageBox: $storageBox,
+            targetFolder: $folder,
+            autoAddMedia: $request->boolean('auto_add_media', true)
+        );
+
+        if ($result['queued'] === 0) {
+            return back()->with('message', 'Geçerli bir URL bulunamadı veya aktarıma uygun link tespit edilemedi.');
+        }
+
+        return back()->with('message', sprintf(
+            'Toplam %d adet indirme linki %s için başarıyla kuyruğa eklendi. Sırayla aktarılacaktır.',
+            $result['queued'],
+            $storageBox->name
+        ));
+    }
+
+    /**
      * Get real-time progress for all active and recent transfers.
      */
     public function getTransfers(): JsonResponse

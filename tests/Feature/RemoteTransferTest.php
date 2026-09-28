@@ -96,3 +96,31 @@ test('admin can cancel a transfer', function () {
 
     expect($transfer->fresh()->status)->toBe('cancelled');
 });
+
+test('admin can queue bulk transfers from multiline urls', function () {
+    Queue::fake();
+
+    $urls = "https://example.com/movie1.2025.mkv\nhttps://example.com/movie2.2025.mkv\nhttps://example.com/series.s01e01.mkv";
+
+    $response = $this->actingAs($this->admin)->post(route('admin.storage-boxes.bulk-remote-transfer'), [
+        'urls' => $urls,
+        'storage_box_id' => $this->box->id,
+        'target_folder' => 'Filmler',
+        'auto_add_media' => true,
+    ]);
+
+    $response->assertRedirect();
+
+    $this->assertDatabaseHas('remote_transfers', [
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/movie1.2025.mkv',
+    ]);
+
+    $this->assertDatabaseHas('remote_transfers', [
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/movie2.2025.mkv',
+    ]);
+
+    Queue::assertPushed(ProcessRemoteTransferJob::class, 3);
+});
+

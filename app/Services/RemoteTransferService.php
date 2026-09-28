@@ -99,6 +99,84 @@ class RemoteTransferService
     }
 
     /**
+     * Parse bulk URLs and enqueue all valid transfers.
+     */
+    public function createBulkTransfers(string|array $rawUrls, StorageBox $storageBox, ?string $targetFolder = null, bool $autoAddMedia = true): array
+    {
+        $lines = is_array($rawUrls) ? $rawUrls : preg_split('/[\r\n]+/', trim($rawUrls));
+        $validUrls = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (empty($line)) continue;
+
+            if (preg_match('/https?:\/\/[^\s]+/', $line, $matches)) {
+                $url = $matches[0];
+                if (filter_var($url, FILTER_VALIDATE_URL)) {
+                    $validUrls[] = $url;
+                }
+            }
+        }
+
+        $validUrls = array_values(array_unique($validUrls));
+        $queued = [];
+        $errors = [];
+
+        foreach ($validUrls as $url) {
+            try {
+                $probe = $this->probeUrl($url);
+                $fileName = $probe['file_name'] ?: 'media_' . time() . '_' . Str::random(5) . '.mkv';
+
+                $folder = ! empty($targetFolder) && $targetFolder !== 'auto'
+                    ? trim($targetFolder, '/\\')
+                    : ($probe['suggested_folder'] ?? 'Filmler');
+
+                $relativePath = ($folder ? $folder . '/' : '') . $fileName;
+
+                $transfer = RemoteTransfer::create([
+                    'storage_box_id' => $storageBox->id,
+                    'source_url' => $url,
+                    'target_folder' => $folder,
+                    'file_name' => $fileName,
+                    'relative_path' => $relativePath,
+                    'total_bytes' => $probe['file_size'] ?? 0,
+                    'transferred_bytes' => 0,
+                    'progress_percent' => 0.00,
+                    'speed_bps' => 0,
+                    'status' => 'pending',
+                    'auto_add_media' => $autoAddMedia,
+                ]);
+
+                \App\Jobs\ProcessRemoteTransferJob::dispatch($transfer);
+                $queued[] = $transfer;
+            } catch (Exception $e) {
+                $errors[] = [
+                    'url' => $url,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        $this->auditLogService->log(
+            action: 'bulk_remote_transfers_queued',
+            targetType: 'StorageBox',
+            targetId: (string) $storageBox->id,
+            newValues: [
+                'total_requested' => count($validUrls),
+                'queued_count' => count($queued),
+                'error_count' => count($errors),
+            ]
+        );
+
+        return [
+            'total' => count($validUrls),
+            'queued' => count($queued),
+            'transfers' => $queued,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
      * Perform the actual streaming transfer from Source URL to Storage Box.
      */
     public function executeTransfer(RemoteTransfer $transfer, ?callable $progressCallback = null): bool
