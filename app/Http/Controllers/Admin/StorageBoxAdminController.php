@@ -31,32 +31,121 @@ class StorageBoxAdminController extends Controller
 
     public function index(): Response
     {
-        $boxes = StorageBox::withCount('media')
+        $rawBoxes = StorageBox::withCount('media')
             ->withSum('media', 'file_size')
             ->orderBy('id', 'desc')
-            ->get()
-            ->map(function ($box) {
-                $isMounted = $this->storageBoxService->isMounted($box);
-                $box->status = $isMounted ? 'online' : 'offline';
-                $box->save();
+            ->get();
 
-                return [
-                    'id' => $box->id,
-                    'name' => $box->name,
-                    'slug' => $box->slug,
-                    'mount_path' => $box->mount_path,
-                    'disk_type' => $box->disk_type,
-                    'host' => $box->host,
-                    'username' => $box->username,
-                    'port' => $box->port ?: 445,
-                    'share_name' => $box->share_name ?: 'backup',
-                    'has_password' => ! empty($box->password),
-                    'is_active' => $box->is_active,
-                    'status' => $box->status,
-                    'media_count' => $box->media_count,
-                    'total_gb' => round(($box->media_sum_file_size ?? 0) / 1073741824, 2),
-                ];
-            });
+        $totalUsedBytes = 0;
+        $totalCapacityBytes = 0;
+        $totalFreeBytes = 0;
+        $hasKnownCapacity = false;
+        $onlineCount = 0;
+
+        $boxes = $rawBoxes->map(function ($box) use (&$totalUsedBytes, &$totalCapacityBytes, &$totalFreeBytes, &$hasKnownCapacity, &$onlineCount) {
+            $isMounted = $this->storageBoxService->isMounted($box);
+            $box->status = $isMounted ? 'online' : 'offline';
+            $box->save();
+
+            if ($box->status === 'online') {
+                $onlineCount++;
+            }
+
+            $mediaUsedBytes = (float) ($box->media_sum_file_size ?? 0);
+            $totalUsedBytes += $mediaUsedBytes;
+
+            $manualCapGb = isset($box->metadata['capacity_gb']) && is_numeric($box->metadata['capacity_gb'])
+                ? (float) $box->metadata['capacity_gb']
+                : null;
+
+            $capacityBytes = null;
+            $freeBytes = null;
+            $capacitySource = 'none';
+
+            if (! empty($manualCapGb) && $manualCapGb > 0) {
+                $capacityBytes = (float) $manualCapGb * 1073741824;
+                $capacitySource = 'manual';
+                $freeBytes = max(0, $capacityBytes - $mediaUsedBytes);
+            } elseif (! empty($box->mount_path) && file_exists($box->mount_path)) {
+                $diskTotal = @disk_total_space($box->mount_path);
+                $diskFree = @disk_free_space($box->mount_path);
+                if ($diskTotal !== false && $diskTotal > 0) {
+                    $capacityBytes = (float) $diskTotal;
+                    $capacitySource = 'auto';
+                    $freeBytes = $diskFree !== false ? (float) $diskFree : null;
+                }
+            }
+
+            if ($capacityBytes !== null) {
+                $hasKnownCapacity = true;
+                $totalCapacityBytes += $capacityBytes;
+                if ($freeBytes !== null) {
+                    $totalFreeBytes += $freeBytes;
+                }
+            }
+
+            $mediaUsagePercent = ($capacityBytes && $capacityBytes > 0)
+                ? round(($mediaUsedBytes / $capacityBytes) * 100, 1)
+                : null;
+
+            $diskUsedBytes = ($capacityBytes !== null && $freeBytes !== null)
+                ? max(0, $capacityBytes - $freeBytes)
+                : null;
+
+            $diskUsagePercent = ($capacityBytes && $capacityBytes > 0 && $diskUsedBytes !== null)
+                ? round(($diskUsedBytes / $capacityBytes) * 100, 1)
+                : null;
+
+            return [
+                'id' => $box->id,
+                'name' => $box->name,
+                'slug' => $box->slug,
+                'mount_path' => $box->mount_path,
+                'disk_type' => $box->disk_type,
+                'host' => $box->host,
+                'username' => $box->username,
+                'port' => $box->port ?: 445,
+                'share_name' => $box->share_name ?: 'backup',
+                'has_password' => ! empty($box->password),
+                'is_active' => $box->is_active,
+                'status' => $box->status,
+                'media_count' => $box->media_count,
+                'total_gb' => round($mediaUsedBytes / 1073741824, 2),
+                'used_bytes' => $mediaUsedBytes,
+                'used_formatted' => $this->formatBytes($mediaUsedBytes),
+                'capacity_gb' => $manualCapGb ?: ($capacityBytes ? round($capacityBytes / 1073741824, 2) : null),
+                'capacity_bytes' => $capacityBytes,
+                'capacity_formatted' => $capacityBytes ? $this->formatBytes($capacityBytes) : 'Bilinmiyor',
+                'capacity_source' => $capacitySource,
+                'free_bytes' => $freeBytes,
+                'free_formatted' => $freeBytes !== null ? $this->formatBytes($freeBytes) : 'Bilinmiyor',
+                'free_gb' => $freeBytes !== null ? round($freeBytes / 1073741824, 2) : null,
+                'media_usage_percent' => $mediaUsagePercent,
+                'disk_usage_percent' => $diskUsagePercent,
+                'usage_percent' => $capacitySource === 'auto' ? $diskUsagePercent : $mediaUsagePercent,
+            ];
+        });
+
+        $totalMediaCount = $rawBoxes->sum('media_count');
+        $totalUsagePercent = ($hasKnownCapacity && $totalCapacityBytes > 0)
+            ? round(($totalUsedBytes / $totalCapacityBytes) * 100, 1)
+            : null;
+
+        $storageSummary = [
+            'total_media_count' => $totalMediaCount,
+            'total_used_bytes' => $totalUsedBytes,
+            'total_used_gb' => round($totalUsedBytes / 1073741824, 2),
+            'total_used_formatted' => $this->formatBytes($totalUsedBytes),
+            'total_capacity_bytes' => $hasKnownCapacity ? $totalCapacityBytes : null,
+            'total_capacity_formatted' => $hasKnownCapacity ? $this->formatBytes($totalCapacityBytes) : 'Bilinmiyor',
+            'total_free_bytes' => $hasKnownCapacity ? $totalFreeBytes : null,
+            'total_free_formatted' => $hasKnownCapacity ? $this->formatBytes($totalFreeBytes) : 'Bilinmiyor',
+            'total_free_gb' => $hasKnownCapacity ? round($totalFreeBytes / 1073741824, 2) : null,
+            'total_usage_percent' => $totalUsagePercent,
+            'has_known_capacity' => $hasKnownCapacity,
+            'online_boxes_count' => $onlineCount,
+            'total_boxes_count' => $rawBoxes->count(),
+        ];
 
         $paginatedTransfers = RemoteTransfer::with('storageBox')
             ->latest()
@@ -93,6 +182,7 @@ class StorageBoxAdminController extends Controller
 
         return Inertia::render('Admin/StorageBoxes/Index', [
             'boxes' => $boxes,
+            'storage_summary' => $storageSummary,
             'recent_transfers' => $transfersData,
         ]);
     }
@@ -108,7 +198,15 @@ class StorageBoxAdminController extends Controller
             'password' => ['nullable', 'string', 'max:500'],
             'port' => ['nullable', 'integer', 'min:1', 'max:65535'],
             'share_name' => ['nullable', 'string', 'max:255'],
+            'capacity_gb' => ['nullable', 'numeric', 'min:0'],
         ]);
+
+        $metadata = [];
+        if (! empty($validated['capacity_gb'])) {
+            $metadata['capacity_gb'] = (float) $validated['capacity_gb'];
+        }
+        unset($validated['capacity_gb']);
+        $validated['metadata'] = $metadata;
 
         $validated['slug'] = Str::slug($validated['name']);
         $validated['is_active'] = true;
@@ -138,7 +236,19 @@ class StorageBoxAdminController extends Controller
             'port' => ['nullable', 'integer', 'min:1', 'max:65535'],
             'share_name' => ['nullable', 'string', 'max:255'],
             'is_active' => ['required', 'boolean'],
+            'capacity_gb' => ['nullable', 'numeric', 'min:0'],
         ]);
+
+        $metadata = $storageBox->metadata ?? [];
+        if (array_key_exists('capacity_gb', $validated)) {
+            if (! empty($validated['capacity_gb'])) {
+                $metadata['capacity_gb'] = (float) $validated['capacity_gb'];
+            } else {
+                unset($metadata['capacity_gb']);
+            }
+            unset($validated['capacity_gb']);
+            $validated['metadata'] = $metadata;
+        }
 
         // If password field is left empty during edit, retain existing encrypted password
         if (empty($validated['password'])) {
@@ -157,6 +267,22 @@ class StorageBoxAdminController extends Controller
         );
 
         return back()->with('message', 'Storage Box bilgileri ve şifresi güncellendi.');
+    }
+
+    protected function formatBytes(int|float|null $bytes): string
+    {
+        if ($bytes === null) {
+            return 'Bilinmiyor';
+        }
+        $bytes = (float) $bytes;
+        if ($bytes <= 0) {
+            return '0 B';
+        }
+        $units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        $i = (int) floor(log($bytes, 1024));
+        $i = min(max(0, $i), count($units) - 1);
+
+        return round($bytes / pow(1024, $i), 2) . ' ' . $units[$i];
     }
 
     public function destroy(StorageBox $storageBox): RedirectResponse

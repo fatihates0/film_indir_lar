@@ -3,7 +3,7 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { useEffect, useState } from 'react';
 
-export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
+export default function StorageBoxesIndex({ boxes, storage_summary, recent_transfers = [] }) {
     const flash = usePage().props.flash;
     const [addBoxModal, setAddBoxModal] = useState(false);
     const [editBoxModal, setEditBoxModal] = useState(null);
@@ -55,6 +55,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
         password: '',
         port: 445,
         share_name: 'backup',
+        capacity_gb: '',
     });
 
     const editForm = useForm({
@@ -67,6 +68,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
         port: 445,
         share_name: 'backup',
         is_active: true,
+        capacity_gb: '',
     });
 
     // Add Media Form
@@ -312,6 +314,7 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
             port: box.port || 445,
             share_name: box.share_name || 'backup',
             is_active: box.is_active,
+            capacity_gb: box.capacity_gb || '',
         });
     };
 
@@ -376,6 +379,108 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                     </div>
                 )}
 
+                {/* Genel Depolama Durumu Özeti (Storage Overview) */}
+                {storage_summary && (
+                    <div className="rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div>
+                                <h3 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                                    <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7M4 7c0-2 1-3 3-3h10c2 0 3 1 3 3M4 7h16m-5 4h.01M9 11h.01M9 15h.01M15 15h.01" />
+                                    </svg>
+                                    Genel Storage Box Depolama Durumu
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                    Tüm bağlı Storage Box'lardaki medya dosyalarının kapladığı alan ve toplam kapasite verileri.
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    {storage_summary.online_boxes_count} / {storage_summary.total_boxes_count} Box Çevrimiçi
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* 4 Stat Cards Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            {/* Card 1: Toplam Medya Kullanılan */}
+                            <div className="rounded-2xl bg-slate-950/60 p-4 border border-slate-800/80 relative overflow-hidden group hover:border-indigo-500/40 transition-all">
+                                <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-xl pointer-events-none group-hover:bg-indigo-500/10 transition-all" />
+                                <div className="text-xs font-medium text-slate-400">Toplam Kullanılan Alan</div>
+                                <div className="text-2xl font-black text-indigo-400 mt-1">
+                                    {storage_summary.total_used_formatted}
+                                </div>
+                                <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                                    <span>{storage_summary.total_media_count} Medya Dosyası</span>
+                                    <span className="text-slate-600">•</span>
+                                    <span className="font-mono text-indigo-300/80">{storage_summary.total_used_gb} GB</span>
+                                </div>
+                            </div>
+
+                            {/* Card 2: Toplam Kapasite */}
+                            <div className="rounded-2xl bg-slate-950/60 p-4 border border-slate-800/80 relative overflow-hidden group hover:border-cyan-500/40 transition-all">
+                                <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/5 rounded-full blur-xl pointer-events-none group-hover:bg-cyan-500/10 transition-all" />
+                                <div className="text-xs font-medium text-slate-400">Toplam Disk Kapasitesi</div>
+                                <div className="text-2xl font-black text-cyan-400 mt-1">
+                                    {storage_summary.total_capacity_formatted}
+                                </div>
+                                <div className="text-[11px] text-slate-500 mt-1">
+                                    {storage_summary.has_known_capacity ? 'Bağlı disklerden okunan toplam' : 'Kapasite bilgisi bekleniyor'}
+                                </div>
+                            </div>
+
+                            {/* Card 3: Toplam Boş Alan */}
+                            <div className="rounded-2xl bg-slate-950/60 p-4 border border-slate-800/80 relative overflow-hidden group hover:border-emerald-500/40 transition-all">
+                                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-xl pointer-events-none group-hover:bg-emerald-500/10 transition-all" />
+                                <div className="text-xs font-medium text-slate-400">Toplam Boş Alan</div>
+                                <div className="text-2xl font-black text-emerald-400 mt-1">
+                                    {storage_summary.total_free_formatted}
+                                </div>
+                                <div className="text-[11px] text-slate-500 mt-1">
+                                    {storage_summary.total_free_gb !== null ? `${storage_summary.total_free_gb} GB Boş Yer Mevcut` : 'Kapasite girilmedi'}
+                                </div>
+                            </div>
+
+                            {/* Card 4: Genel Doluluk Oranı */}
+                            <div className="rounded-2xl bg-slate-950/60 p-4 border border-slate-800/80 relative overflow-hidden group hover:border-purple-500/40 transition-all">
+                                <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full blur-xl pointer-events-none group-hover:bg-purple-500/10 transition-all" />
+                                <div className="text-xs font-medium text-slate-400">Genel Doluluk Oranı</div>
+                                <div className="text-2xl font-black text-purple-400 mt-1">
+                                    {storage_summary.total_usage_percent !== null ? `%${storage_summary.total_usage_percent}` : '-%'}
+                                </div>
+                                <div className="text-[11px] text-slate-500 mt-1">
+                                    {storage_summary.has_known_capacity ? `${storage_summary.total_used_formatted} / ${storage_summary.total_capacity_formatted}` : 'Kapasite girilmedi'}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Genel Progress Bar */}
+                        {storage_summary.has_known_capacity && (
+                            <div className="space-y-1.5 pt-2">
+                                <div className="flex justify-between text-xs text-slate-400">
+                                    <span>Havuz Doluluk Seviyesi</span>
+                                    <span className="font-mono text-slate-300 font-bold">
+                                        {storage_summary.total_used_formatted} / {storage_summary.total_capacity_formatted} ({storage_summary.total_usage_percent}%)
+                                    </span>
+                                </div>
+                                <div className="w-full bg-slate-950 rounded-full h-3 p-0.5 border border-slate-800 overflow-hidden">
+                                    <div
+                                        className={`h-full rounded-full transition-all duration-500 ${
+                                            (storage_summary.total_usage_percent ?? 0) > 90
+                                                ? 'bg-gradient-to-r from-rose-500 to-red-600'
+                                                : (storage_summary.total_usage_percent ?? 0) > 75
+                                                ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+                                                : 'bg-gradient-to-r from-indigo-500 via-teal-500 to-emerald-500'
+                                        }`}
+                                        style={{ width: `${Math.min(100, Math.max(1, storage_summary.total_usage_percent ?? 0))}%` }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Storage Boxes Cards Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {boxes.length > 0 ? (
@@ -404,15 +509,68 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                                         <div><span className="text-slate-500">Mount Yolu:</span> <strong className="text-indigo-300 break-all">{box.mount_path}</strong></div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-2 text-xs">
-                                        <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800">
-                                            <span className="text-slate-400">İçerik:</span>
-                                            <div className="text-sm font-bold text-white mt-0.5">{box.media_count} Medya</div>
+                                    {/* Storage Capacity & Used Statistics */}
+                                    <div className="space-y-2.5">
+                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                            <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800">
+                                                <span className="text-slate-400 text-[11px]">İçerik:</span>
+                                                <div className="text-sm font-bold text-white mt-0.5">{box.media_count} Medya</div>
+                                            </div>
+                                            <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800">
+                                                <span className="text-slate-400 text-[11px]">Kullanılan Alan:</span>
+                                                <div className="text-sm font-bold text-indigo-400 mt-0.5" title={`${box.used_bytes || 0} bytes`}>
+                                                    {box.used_formatted || `${box.total_gb} GB`}
+                                                </div>
+                                            </div>
+                                            <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800">
+                                                <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                                                    <span>Kapasite:</span>
+                                                    {box.capacity_source === 'auto' && (
+                                                        <span className="text-[10px] text-cyan-400 bg-cyan-500/10 px-1 rounded">Oto</span>
+                                                    )}
+                                                    {box.capacity_source === 'manual' && (
+                                                        <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1 rounded">Manuel</span>
+                                                    )}
+                                                </div>
+                                                <div className="text-sm font-bold text-cyan-300 mt-0.5">
+                                                    {box.capacity_formatted || 'Bilinmiyor'}
+                                                </div>
+                                            </div>
+                                            <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800">
+                                                <span className="text-slate-400 text-[11px]">Boş Alan:</span>
+                                                <div className="text-sm font-bold text-emerald-400 mt-0.5">
+                                                    {box.free_formatted || 'Bilinmiyor'}
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800">
-                                            <span className="text-slate-400">Toplam Boyut:</span>
-                                            <div className="text-sm font-bold text-indigo-400 mt-0.5">{box.total_gb} GB</div>
-                                        </div>
+
+                                        {/* Box Progress Bar */}
+                                        {box.capacity_bytes > 0 ? (
+                                            <div className="space-y-1">
+                                                <div className="flex justify-between items-center text-[11px] text-slate-400">
+                                                    <span>Doluluk</span>
+                                                    <span className="font-mono font-bold text-slate-200">
+                                                        %{box.usage_percent ?? 0}
+                                                    </span>
+                                                </div>
+                                                <div className="w-full bg-slate-950 rounded-full h-2 border border-slate-800 overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all duration-500 ${
+                                                            (box.usage_percent ?? 0) > 90
+                                                                ? 'bg-rose-500'
+                                                                : (box.usage_percent ?? 0) > 75
+                                                                ? 'bg-amber-500'
+                                                                : 'bg-emerald-500'
+                                                        }`}
+                                                        style={{ width: `${Math.min(100, Math.max(1, box.usage_percent ?? 0))}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-[10px] text-slate-500 text-center py-1">
+                                                Kapasite okunamadı. Dilerseniz Düzenle'den GB olarak girebilirsiniz.
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -862,6 +1020,23 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                                     </div>
                                 </div>
 
+                                <div>
+                                    <label className="block font-semibold text-slate-300 mb-1">
+                                        Toplam Kapasite (GB) <span className="text-slate-500 font-normal">(Opsiyonel)</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={boxForm.data.capacity_gb}
+                                        onChange={(e) => boxForm.setData('capacity_gb', e.target.value)}
+                                        className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
+                                        placeholder="Örn: 1000 (1 TB için). Boş bırakılırsa diskten otomatik okunur."
+                                        min="1"
+                                    />
+                                    <p className="text-[11px] text-slate-500 mt-1">
+                                        Hetzner planınızın kapasitesini manuel yazabilirsiniz veya diskin otomatik hesaplanmasına izin verebilirsiniz.
+                                    </p>
+                                </div>
+
                                 <div className="pt-4 border-t border-slate-800 flex gap-2">
                                     <button
                                         type="submit"
@@ -948,6 +1123,23 @@ export default function StorageBoxesIndex({ boxes, recent_transfers = [] }) {
                                         className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono text-xs"
                                         required
                                     />
+                                </div>
+
+                                <div>
+                                    <label className="block font-semibold text-slate-300 mb-1">
+                                        Toplam Kapasite (GB) <span className="text-slate-500 font-normal">(Opsiyonel)</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={editForm.data.capacity_gb}
+                                        onChange={(e) => editForm.setData('capacity_gb', e.target.value)}
+                                        className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
+                                        placeholder="Örn: 1000 (1 TB için). Boş bırakılırsa diskten otomatik okunur."
+                                        min="1"
+                                    />
+                                    <p className="text-[11px] text-slate-500 mt-1">
+                                        Hetzner planınızın kapasitesini manuel yazabilirsiniz veya diskin otomatik hesaplanmasına izin verebilirsiniz.
+                                    </p>
                                 </div>
 
                                 <div className="pt-4 border-t border-slate-800 flex gap-2">
