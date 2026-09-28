@@ -10,6 +10,8 @@ use App\Services\JellyfinService;
 use Exception;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -26,22 +28,35 @@ class JellyfinAdminController extends Controller
         $apiUsers = [];
         $apiError = null;
 
+        // Auto-run migration if table is not yet created on this environment
+        $tableExists = Schema::hasTable('jellyfin_accounts');
+        if (! $tableExists) {
+            try {
+                Artisan::call('migrate', ['--force' => true]);
+                $tableExists = Schema::hasTable('jellyfin_accounts');
+            } catch (Exception $e) {
+                $apiError = 'Veritabanı tablosu ("jellyfin_accounts") bulunamadı. Lütfen sunucunuzda "php artisan migrate" komutunu çalıştırın.';
+            }
+        }
+
         if ($serverStatus['online']) {
             try {
                 $apiUsers = $this->jellyfinService->getUsers();
 
-                // Auto-sync or update local records
-                foreach ($apiUsers as $u) {
-                    JellyfinAccount::updateOrCreate(
-                        ['jellyfin_user_id' => $u['id']],
-                        [
-                            'username' => $u['name'],
-                            'is_administrator' => $u['is_administrator'],
-                            'is_disabled' => $u['is_disabled'],
-                            'last_activity_date' => ! empty($u['last_activity_date']) ? date('Y-m-d H:i:s', strtotime($u['last_activity_date'])) : null,
-                            'metadata' => $u['raw'] ?? [],
-                        ]
-                    );
+                // Auto-sync or update local records if table exists
+                if ($tableExists) {
+                    foreach ($apiUsers as $u) {
+                        JellyfinAccount::updateOrCreate(
+                            ['jellyfin_user_id' => $u['id']],
+                            [
+                                'username' => $u['name'],
+                                'is_administrator' => $u['is_administrator'],
+                                'is_disabled' => $u['is_disabled'],
+                                'last_activity_date' => ! empty($u['last_activity_date']) ? date('Y-m-d H:i:s', strtotime($u['last_activity_date'])) : null,
+                                'metadata' => $u['raw'] ?? [],
+                            ]
+                        );
+                    }
                 }
             } catch (Exception $e) {
                 $apiError = $e->getMessage();
@@ -49,9 +64,11 @@ class JellyfinAdminController extends Controller
         }
 
         // Fetch local accounts with attached MedyaHub users
-        $localAccounts = JellyfinAccount::with('user:id,name,email')
-            ->orderBy('username', 'asc')
-            ->get();
+        $localAccounts = $tableExists
+            ? JellyfinAccount::with('user:id,name,email')
+                ->orderBy('username', 'asc')
+                ->get()
+            : collect();
 
         // Merge API details with local associations
         $usersList = $localAccounts->map(function ($acc) use ($apiUsers) {
@@ -115,6 +132,10 @@ class JellyfinAdminController extends Controller
         ]);
 
         try {
+            if (! Schema::hasTable('jellyfin_accounts')) {
+                Artisan::call('migrate', ['--force' => true]);
+            }
+
             $created = $this->jellyfinService->createUser(
                 $validated['username'],
                 $validated['password'] ?? null
@@ -193,6 +214,10 @@ class JellyfinAdminController extends Controller
     public function sync(): RedirectResponse
     {
         try {
+            if (! Schema::hasTable('jellyfin_accounts')) {
+                Artisan::call('migrate', ['--force' => true]);
+            }
+
             $users = $this->jellyfinService->getUsers();
 
             foreach ($users as $u) {
