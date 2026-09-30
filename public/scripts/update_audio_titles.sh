@@ -1,9 +1,10 @@
 #!/bin/bash
 # ==============================================================================
-# Storage Box MKV Görüntü ve Ses Başlığı Güncelleme Betiği (TSI) - v2.0
+# Storage Box MKV Görüntü ve Ses Başlığı Güncelleme Betiği - v2.5
 # ==============================================================================
-# Seçilen Storage Box veya dizindeki tüm .mkv dosyalarını tarar,
-# görüntü ve ses izlerinin başlıklarını "TSI" yapar (dillerini DEĞİŞTİRMEZ).
+# Seçilen Storage Box veya dizindeki tüm .mkv dosyalarını tarar.
+# Ses başlıklarını diline göre "Türkçe - TSI", "English - TSI" şeklinde günceller.
+# Görüntü başlıklarını "TSI" yapar. Diller kesinlikle DEĞİŞTİRİLMEZ.
 # ==============================================================================
 
 # Shell renklendirmeleri
@@ -71,44 +72,66 @@ get_storageboxes() {
     fi
 }
 
-# MKV dosyasındaki görüntü ve ses izlerinin track numaralarını tespit et (properties.number)
-get_video_audio_track_numbers() {
+# MKV dosyasındaki görüntü ve ses izlerinin track numaralarını ve başlık adlarını tespit et
+get_track_updates() {
     local file="$1"
-    local nums=()
 
     if command -v python3 &>/dev/null; then
-        while IFS= read -r line; do
-            [ -n "$line" ] && nums+=("$line")
-        done < <(python3 -c "
+        python3 -c "
 import json, sys, subprocess
+
+LANG_MAP = {
+    'tur': 'Türkçe', 'tr': 'Türkçe', 'turkish': 'Türkçe',
+    'eng': 'English', 'en': 'English', 'english': 'English',
+    'ger': 'Deutsch', 'deu': 'Deutsch', 'de': 'Deutsch', 'german': 'Deutsch',
+    'fre': 'Français', 'fra': 'Français', 'fr': 'Français', 'french': 'Français',
+    'spa': 'Español', 'es': 'Español', 'spanish': 'Español',
+    'ita': 'Italiano', 'it': 'Italiano', 'italian': 'Italiano',
+    'rus': 'Pусский', 'ru': 'Pусский', 'russian': 'Pусский',
+    'jpn': 'Japanese', 'ja': 'Japanese', 'japanese': 'Japanese',
+    'kor': 'Korean', 'ko': 'Korean', 'korean': 'Korean',
+    'zho': 'Chinese', 'chi': 'Chinese', 'zh': 'Chinese', 'chinese': 'Chinese',
+    'ara': 'Arabic', 'ar': 'Arabic', 'arabic': 'Arabic',
+    'hin': 'Hindi', 'hi': 'Hindi', 'hindi': 'Hindi',
+    'por': 'Português', 'pt': 'Português', 'portuguese': 'Português',
+    'pol': 'Polski', 'pl': 'Polski', 'polish': 'Polski',
+    'nld': 'Nederlands', 'nl': 'Nederlands', 'dutch': 'Nederlands',
+}
+
 try:
     res = subprocess.run(['mkvmerge', '-J', sys.argv[1]], capture_output=True, text=True)
     data = json.loads(res.stdout)
     for t in data.get('tracks', []):
-        if t.get('type') in ('video', 'audio'):
+        ttype = t.get('type')
+        if ttype in ('video', 'audio'):
             num = t.get('properties', {}).get('number')
             if num is None:
                 num = t.get('id', 0) + 1
-            print(num)
+            
+            if ttype == 'audio':
+                props = t.get('properties', {})
+                lang_code = (props.get('language_ietf') or props.get('language') or '').lower().strip()
+                if lang_code in LANG_MAP:
+                    lang_name = LANG_MAP[lang_code]
+                    title = f'{lang_name} - TSI' if lang_name else 'TSI'
+                elif lang_code and lang_code != 'und':
+                    title = f'{lang_code.upper()} - TSI'
+                else:
+                    title = 'TSI'
+            else:
+                title = 'TSI'
+
+            print(f'{num}|{title}')
 except Exception:
     pass
-" "$file" 2>/dev/null)
+" "$file" 2>/dev/null
     fi
-
-    # Eğer python çıktısı boş kaldıysa mkvmerge json parse fallback
-    if [ ${#nums[@]} -eq 0 ] && command -v mkvmerge &>/dev/null; then
-        while IFS= read -r line; do
-            [ -n "$line" ] && nums+=("$line")
-        done < <(mkvmerge -J "$file" 2>/dev/null | grep -B 2 -A 10 -E '"type": "(video|audio)"' | grep '"number":' | awk -F': ' '{print $2}' | tr -d ', ')
-    fi
-
-    echo "${nums[@]}"
 }
 
 # Ana Başlık Ekranı
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================${NC}"
-echo -e "${CYAN}   STORAGE BOX MKV GÖRÜNTÜ VE SES BAŞLIĞI (TSI)    ${NC}"
+echo -e "${CYAN}   STORAGE BOX MKV İZ BAŞLIĞI GÜNCELLEME (TSI)     ${NC}"
 echo -e "${CYAN}=====================================================${NC}"
 
 get_storageboxes
@@ -178,8 +201,8 @@ fi
 
 echo -e "${GREEN}✔ Toplam $TOTAL adet .mkv dosyası tespit edildi.${NC}\n"
 echo -e "${YELLOW}-----------------------------------------------------------------${NC}"
-echo -e "${BOLD}DİKKAT:${NC} Tüm .mkv dosyalarındaki görüntü ve ses izlerinin başlığı '${BOLD}TSI${NC}' yapılacaktır."
-echo -e "${BOLD}Görüntü ve ses dilleri (language) değiştirilmeyecek, aynen korunacaktır.${NC}"
+echo -e "${BOLD}DİKKAT:${NC} Ses izlerinin başlığı diline göre '${BOLD}Türkçe - TSI${NC}', '${BOLD}English - TSI${NC}' yapılacaktır."
+echo -e "${BOLD}Görüntü ve ses dilleri (language) DEĞİŞTİRİLMEYECEK, aynen korunacaktır.${NC}"
 echo -e "${YELLOW}-----------------------------------------------------------------${NC}\n"
 
 read -p "İşlemi başlatmak istiyor musunuz? [E/h]: " CONFIRM < /dev/tty
@@ -190,7 +213,7 @@ if [[ ! "$CONFIRM" =~ ^[EeYy]$ ]]; then
     exit 0
 fi
 
-echo -e "\n${CYAN}[2/3] Görüntü ve ses başlıkları 'TSI' olarak güncelleniyor...${NC}"
+echo -e "\n${CYAN}[2/3] Başlıklar güncelleniyor...${NC}"
 
 SUCCESS_COUNT=0
 SKIPPED_COUNT=0
@@ -211,26 +234,29 @@ for file in "${FILES[@]}"; do
         continue
     fi
 
-    # Görüntü ve ses izlerinin track numaralarını al
-    TRACK_NUMS=($(get_video_audio_track_numbers "$file"))
+    # Görüntü ve ses izlerinin güncellemelerini al (num|title)
+    ARGS=()
+    UPDATES_DESC=()
+    
+    while IFS='|' read -r num title; do
+        if [ -n "$num" ] && [ -n "$title" ]; then
+            ARGS+=(--edit "track:$num" --set "name=$title")
+            UPDATES_DESC+=("Track #$num: '$title'")
+        fi
+    done < <(get_track_updates "$file")
 
-    if [ ${#TRACK_NUMS[@]} -eq 0 ]; then
-        echo -e "   ${YELLOW}└─► Görüntü/Ses izi bulunamadı, atlanıyor.${NC}"
+    if [ ${#ARGS[@]} -eq 0 ]; then
+        echo -e "   ${YELLOW}└─► İşlenecek görüntü/ses izi bulunamadı, atlanıyor.${NC}"
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
         continue
     fi
-
-    ARGS=()
-    for num in "${TRACK_NUMS[@]}"; do
-        ARGS+=(--edit "track:$num" --set "name=TSI")
-    done
 
     # mkvpropedit çalıştır ve çıktıyı yakala
     ERR_OUTPUT=$(mkvpropedit "$file" "${ARGS[@]}" 2>&1)
     EXIT_CODE=$?
 
     if [ $EXIT_CODE -eq 0 ]; then
-        echo -e "   ${GREEN}└─► ✔ Başarılı (${#TRACK_NUMS[@]} iz [görüntü + ses] başlığı 'TSI' yapıldı, diller korundu)${NC}"
+        echo -e "   ${GREEN}└─► ✔ Başarılı (${UPDATES_DESC[*]} yapıldı, diller korundu)${NC}"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
         CLEAN_ERR=$(echo "$ERR_OUTPUT" | tr '\n' ' ' | sed 's/  */ /g')
