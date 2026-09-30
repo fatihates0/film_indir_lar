@@ -1,9 +1,10 @@
 #!/bin/bash
 # ==============================================================================
-# Storage Box MKV Görüntü ve Ses Başlığı Güncelleme Betiği - v2.5
+# Storage Box MKV Görüntü ve Ses Başlığı Güncelleme Betiği - v3.0
 # ==============================================================================
 # Seçilen Storage Box veya dizindeki tüm .mkv dosyalarını tarar.
 # Ses başlıklarını diline göre "Türkçe - TSI", "English - TSI" şeklinde günceller.
+# Türkçe ses izi varsa onu otomatik VARSAYILAN SES (default track) yapar.
 # Görüntü başlıklarını "TSI" yapar. Diller kesinlikle DEĞİŞTİRİLMEZ.
 # ==============================================================================
 
@@ -72,7 +73,7 @@ get_storageboxes() {
     fi
 }
 
-# MKV dosyasındaki görüntü ve ses izlerinin track numaralarını ve başlık adlarını tespit et
+# MKV dosyasındaki görüntü ve ses izlerinin numaralarını, başlıklarını ve varsayılan ses bilgisini tespit et
 get_track_updates() {
     local file="$1"
 
@@ -101,7 +102,19 @@ LANG_MAP = {
 try:
     res = subprocess.run(['mkvmerge', '-J', sys.argv[1]], capture_output=True, text=True)
     data = json.loads(res.stdout)
-    for t in data.get('tracks', []):
+    tracks = data.get('tracks', [])
+
+    has_turkish_audio = False
+    for t in tracks:
+        if t.get('type') == 'audio':
+            props = t.get('properties', {})
+            lang_code = (props.get('language_ietf') or props.get('language') or '').lower().strip()
+            if lang_code in ('tur', 'tr', 'turkish'):
+                has_turkish_audio = True
+                break
+
+    found_turkish_default = False
+    for t in tracks:
         ttype = t.get('type')
         if ttype in ('video', 'audio'):
             num = t.get('properties', {}).get('number')
@@ -118,10 +131,19 @@ try:
                     title = f'{lang_code.upper()} - TSI'
                 else:
                     title = 'TSI'
+
+                default_flag = ''
+                if has_turkish_audio:
+                    if lang_code in ('tur', 'tr', 'turkish') and not found_turkish_default:
+                        default_flag = '1'
+                        found_turkish_default = True
+                    else:
+                        default_flag = '0'
+
+                print(f'{num}|{title}|{default_flag}')
             else:
                 title = 'TSI'
-
-            print(f'{num}|{title}')
+                print(f'{num}|{title}|')
 except Exception:
     pass
 " "$file" 2>/dev/null
@@ -201,7 +223,8 @@ fi
 
 echo -e "${GREEN}✔ Toplam $TOTAL adet .mkv dosyası tespit edildi.${NC}\n"
 echo -e "${YELLOW}-----------------------------------------------------------------${NC}"
-echo -e "${BOLD}DİKKAT:${NC} Ses izlerinin başlığı diline göre '${BOLD}Türkçe - TSI${NC}', '${BOLD}English - TSI${NC}' yapılacaktır."
+echo -e "${BOLD}DİKKAT:${NC} Ses izlerinin başlığı '${BOLD}Türkçe - TSI${NC}', '${BOLD}English - TSI${NC}' yapılacaktır."
+echo -e "${BOLD}Türkçe ses dosyası varsa otomatik VARSAYILAN SES (default track) atanacaktır.${NC}"
 echo -e "${BOLD}Görüntü ve ses dilleri (language) DEĞİŞTİRİLMEYECEK, aynen korunacaktır.${NC}"
 echo -e "${YELLOW}-----------------------------------------------------------------${NC}\n"
 
@@ -213,7 +236,7 @@ if [[ ! "$CONFIRM" =~ ^[EeYy]$ ]]; then
     exit 0
 fi
 
-echo -e "\n${CYAN}[2/3] Başlıklar güncelleniyor...${NC}"
+echo -e "\n${CYAN}[2/3] Başlıklar ve varsayılan ses tercihleri güncelleniyor...${NC}"
 
 SUCCESS_COUNT=0
 SKIPPED_COUNT=0
@@ -234,14 +257,22 @@ for file in "${FILES[@]}"; do
         continue
     fi
 
-    # Görüntü ve ses izlerinin güncellemelerini al (num|title)
+    # Görüntü ve ses izlerinin güncellemelerini al (num|title|default_flag)
     ARGS=()
     UPDATES_DESC=()
     
-    while IFS='|' read -r num title; do
+    while IFS='|' read -r num title default_flag; do
         if [ -n "$num" ] && [ -n "$title" ]; then
             ARGS+=(--edit "track:$num" --set "name=$title")
-            UPDATES_DESC+=("Track #$num: '$title'")
+            if [ "$default_flag" = "1" ]; then
+                ARGS+=(--set "flag-default=1")
+                UPDATES_DESC+=("Track #$num: '$title' [VARSAYILAN SES]")
+            elif [ "$default_flag" = "0" ]; then
+                ARGS+=(--set "flag-default=0")
+                UPDATES_DESC+=("Track #$num: '$title'")
+            else
+                UPDATES_DESC+=("Track #$num: '$title'")
+            fi
         fi
     done < <(get_track_updates "$file")
 
