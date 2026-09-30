@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Storage Box MKV Ses Başlığı Güncelleme Betiği (TSI) - v1.2
+# Storage Box MKV Ses Başlığı Güncelleme Betiği (TSI) - v1.3
 # ==============================================================================
 # Seçilen Storage Box veya dizindeki tüm .mkv dosyalarını tarar,
 # ses dosyalarının başlıklarını "TSI" yapar (ses dillerini DEĞİŞTİRMEZ).
@@ -222,7 +222,7 @@ for file in "${FILES[@]}"; do
 
     ARGS=()
     for num in "${TRACK_NUMS[@]}"; do
-        ARGS+=(--edit "track:$num" --set "title=TSI")
+        ARGS+=(--edit "track:$num" --set "name=TSI")
     done
 
     # mkvpropedit çalıştır ve çıktıyı yakala
