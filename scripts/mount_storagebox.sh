@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Hetzner Storage Box Gelişmiş Yönetim Sihirbazı (v2.0 - Hata Düzeltmeli)
+# Hetzner Storage Box Gelişmiş Yönetim Sihirbazı (v2.1 - Özel URL Destekli)
 # ==============================================================================
 
 # Shell renklendirmeleri
@@ -70,22 +70,32 @@ add_storagebox() {
     read -p "1) Storage Box Kullanıcı Adı (Örn: u123456): " USERNAME < /dev/tty
     read -sp "2) Storage Box Şifresi: " PASSWORD < /dev/tty
     echo ""
-    read -p "3) Mount Klasör Adı (Örn: box1, filmler, diziler): " FOLDER_NAME < /dev/tty
+    read -p "3) Storage Box Ağ Yolu / URL [Varsayılan: //${USERNAME}.your-storagebox.de/backup]: " RAW_HOST < /dev/tty
+    read -p "4) Mount Klasör Adı (Örn: box1, filmler, diziler): " FOLDER_NAME < /dev/tty
 
     if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ] || [ -z "$FOLDER_NAME" ]; then
-        echo -e "\n${RED}[HATA] Tüm alanları doldurmanız gerekmektedir!${NC}"
+        echo -e "\n${RED}[HATA] Tüm zorunlu alanları (Kullanıcı Adı, Şifre, Klasör Adı) doldurmanız gerekmektedir!${NC}"
         read -p "Devam etmek için Enter'a basın..." dummy < /dev/tty
         return
     fi
 
-    # Mount yolu belirleme
+    # Sunucu/Paylaşım yolu belirleme (Baştaki // eksikse otomatik ekle)
+    if [ -z "$RAW_HOST" ]; then
+        SERVER_HOST="//${USERNAME}.your-storagebox.de/backup"
+    else
+        SERVER_HOST="$RAW_HOST"
+        if [[ "$SERVER_HOST" != //* ]]; then
+            SERVER_HOST="//${SERVER_HOST}"
+        fi
+    fi
+
+    # Mount yolu ve kimlik dosyası belirleme
     MOUNT_PATH="/mnt/storageboxes/${FOLDER_NAME}"
     CRED_PATH="/etc/storagebox/cred_${FOLDER_NAME}"
-    SERVER_HOST="${USERNAME}.your-storagebox.de"
 
     echo -e "\n${YELLOW}--- ÖZET ---${NC}"
     echo -e "Kullanıcı Adı   : ${GREEN}${USERNAME}${NC}"
-    echo -e "Sunucu Adresi   : ${GREEN}${SERVER_HOST}${NC}"
+    echo -e "Ağ Yolu / URL   : ${GREEN}${SERVER_HOST}${NC}"
     echo -e "Mount Konumu    : ${GREEN}${MOUNT_PATH}${NC}"
     echo -e "----------------"
 
@@ -104,8 +114,8 @@ EOF
             chmod 600 "$CRED_PATH"
 
             echo -e "${CYAN}[3/4] /etc/fstab güncelleniyor...${NC}"
-            # Hetzner CIFS için en uyumlu ve yetki sorunu yaşatmayan parametreler (vers=3.0, file_mode=0777, dir_mode=0777)
-            FSTAB_LINE="//${SERVER_HOST}/backup ${MOUNT_PATH} cifs credentials=${CRED_PATH},iocharset=utf8,rw,file_mode=0777,dir_mode=0777,vers=3.0,_netdev 0 0"
+            # CIFS için tam paylaşımlı fstab satırı
+            FSTAB_LINE="${SERVER_HOST} ${MOUNT_PATH} cifs credentials=${CRED_PATH},iocharset=utf8,rw,file_mode=0777,dir_mode=0777,vers=3.0,_netdev 0 0"
 
             if grep -q "${MOUNT_PATH}" /etc/fstab; then
                 echo -e "${YELLOW}[BİLGİ] ${MOUNT_PATH} zaten /etc/fstab dosyasında mevcut.${NC}"
@@ -121,14 +131,15 @@ EOF
             if mount "$MOUNT_PATH"; then
                 MOUNT_SUCCESS=1
             else
-                # vers=3.0 hata verirse varsayılan CIFS versiyonu ile dene
-                echo -e "${YELLOW}[BİLGİ] vers=3.0 ile mount başarısız oldu, alternatif versiyon deneniyor...${NC}"
+                # vers=3.0 hata verirse vers=2.1 ile dene
+                echo -e "${YELLOW}[BİLGİ] vers=3.0 ile mount başarısız oldu, vers=2.1 deneniyor...${NC}"
                 sed -i "s/vers=3.0/vers=2.1/g" /etc/fstab
                 systemctl daemon-reload 2>/dev/null
                 if mount "$MOUNT_PATH"; then
                     MOUNT_SUCCESS=1
                 else
                     # versiz dene
+                    echo -e "${YELLOW}[BİLGİ] Varsayılan CIFS versiyonu deneniyor...${NC}"
                     sed -i "s/,vers=2.1//g" /etc/fstab
                     systemctl daemon-reload 2>/dev/null
                     if mount "$MOUNT_PATH"; then
@@ -156,10 +167,12 @@ EOF
                 ls -la "$MOUNT_PATH"
             else
                 echo -e "\n${RED}[HATA] Mount başarısız oldu!${NC}"
+                echo -e "${RED}ÖNEMLİ İPUCU:${NC} CIFS/SMB protokolünde sunucu adresi yanında mutlaka bir paylaşım klasörü (Örn: /backup veya /u680225) bulunmalıdır!"
                 echo -e "${RED}Olası Sebepler:${NC}"
-                echo " 1. Storage Box kullanıcı adı veya şifreniz hatalı."
-                echo " 2. Hetzner Storage Box panellerinde CIFS/SMB seçeneği kapalı."
-                echo " 3. Sunucunuzda 'cifs-utils' paketi eksik (Yüklemek için: sudo apt install cifs-utils)"
+                echo " 1. Girilen URL paylaşım adı içermiyor (Örn: //u680225.your-storagebox.de yerine //u680225.your-storagebox.de/backup olmalı)."
+                echo " 2. Storage Box kullanıcı adı veya şifreniz hatalı."
+                echo " 3. Hetzner Storage Box panelinde Samba/CIFS desteği kapalı."
+                echo " 4. Sunucuda 'cifs-utils' paketi eksik (Yüklemek için: sudo apt install cifs-utils)"
             fi
             ;;
         *)
@@ -185,7 +198,6 @@ remove_storagebox() {
 
     echo -e "${YELLOW}Kaldırmak istediğiniz Storage Box'ı seçin:${NC}\n"
 
-    # Diziyi doldur ve ekrana numaralandırarak bas
     MOUNT_LIST=()
     COUNT=1
     while read -r line; do
@@ -205,7 +217,6 @@ remove_storagebox() {
         return
     fi
 
-    # Numaralı seçim mi kontrol et
     if [[ "$TARGET_INPUT" =~ ^[0-9]+$ ]] && [ "$TARGET_INPUT" -ge 1 ] && [ "$TARGET_INPUT" -le "${#MOUNT_LIST[@]}" ]; then
         INDEX=$((TARGET_INPUT - 1))
         TARGET="${MOUNT_LIST[$INDEX]}"
@@ -223,7 +234,6 @@ remove_storagebox() {
             umount -f -l "$TARGET" 2>/dev/null
 
             echo -e "${CYAN}[2/4] /etc/fstab kaydı temizleniyor...${NC}"
-            # Hedef fstab satırını sil (özel karakterleri koruyarak)
             ESCAPED_TARGET=$(echo "$TARGET" | sed 's/\//\\\//g')
             sed -i "/${ESCAPED_TARGET}/d" /etc/fstab
             systemctl daemon-reload 2>/dev/null
