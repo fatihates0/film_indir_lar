@@ -69,6 +69,7 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
 
     // Storage Boxes Management
     Route::get('/storage-boxes', [StorageBoxAdminController::class, 'index'])->name('storage-boxes.index');
+    Route::post('/storage-boxes/scan-all', [StorageBoxAdminController::class, 'scanAll'])->name('storage-boxes.scan-all');
     Route::get('/storage-boxes/{storage_box}/browse', [StorageBoxAdminController::class, 'browse'])->name('storage-boxes.browse');
     Route::post('/storage-boxes', [StorageBoxAdminController::class, 'store'])->name('storage-boxes.store');
     Route::patch('/storage-boxes/{storage_box}', [StorageBoxAdminController::class, 'update'])->name('storage-boxes.update');

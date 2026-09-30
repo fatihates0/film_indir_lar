@@ -319,6 +319,25 @@ class StorageBoxAdminController extends Controller
         ));
     }
 
+    public function scanAll(): RedirectResponse
+    {
+        $result = $this->scannerService->scanAll();
+
+        $this->auditLogService->log(
+            action: 'storage_box_scan_all',
+            targetType: 'StorageBox',
+            targetId: 'all',
+            newValues: $result
+        );
+
+        return back()->with('message', sprintf(
+            'Tüm Storage Box alanları tarandı: %d yeni eklendi, %d güncellendi, %d otomatik keşfedildi.',
+            $result['added'],
+            $result['updated'],
+            $result['discovered_boxes_count']
+        ));
+    }
+
     public function addMedia(StorageBox $storageBox, Request $request): RedirectResponse
     {
         $validated = $request->validate([
