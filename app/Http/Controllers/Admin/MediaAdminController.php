@@ -9,6 +9,8 @@ use App\Models\StorageBox;
 use App\Services\AuditLogService;
 use App\Services\MediaScannerService;
 use App\Services\StorageBoxService;
+use App\Services\TmdbService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -21,13 +23,19 @@ class MediaAdminController extends Controller
         protected MediaScannerService $scannerService,
         protected StorageBoxService $storageBoxService,
         protected AuditLogService $auditLogService,
+        protected TmdbService $tmdbService,
     ) {}
 
     public function index(Request $request): Response
     {
-        $media = Media::with('storageBox')
-            ->orderBy('id', 'desc')
-            ->paginate(15);
+        $query = Media::with('storageBox')->orderBy('id', 'desc');
+
+        if ($request->filled('search')) {
+            $query->where('title', 'like', '%' . $request->search . '%')
+                  ->orWhere('original_title', 'like', '%' . $request->search . '%');
+        }
+
+        $media = $query->paginate(15)->withQueryString();
 
         $storageBoxes = StorageBox::where('is_active', true)
             ->get()
@@ -51,6 +59,7 @@ class MediaAdminController extends Controller
         return Inertia::render('Admin/Media/Index', [
             'media' => $media,
             'storageBoxes' => $storageBoxes,
+            'filters' => $request->only(['search']),
         ]);
     }
 
@@ -78,12 +87,16 @@ class MediaAdminController extends Controller
                 $year = (int) $matches[1];
             }
 
+            // Auto lookup on TMDB
+            $tmdbMatches = $this->tmdbService->search($title, $type === 'movie' ? 'movie' : 'tv', $year);
+
             return response()->json([
                 'status' => 'success',
                 'title' => $title,
                 'type' => $type,
                 'year' => $year,
                 'metadata' => $meta,
+                'tmdb_matches' => array_slice($tmdbMatches, 0, 5),
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -102,6 +115,7 @@ class MediaAdminController extends Controller
             'type' => ['required', 'string', 'in:movie,series,episode'],
             'year' => ['nullable', 'integer', 'min:1900', 'max:2099'],
             'file_size' => ['nullable', 'integer'],
+            'tmdb_id' => ['nullable', 'integer'],
         ]);
 
         $storageBox = StorageBox::findOrFail($validated['storage_box_id']);
@@ -147,6 +161,7 @@ class MediaAdminController extends Controller
                 'type' => $mediaType,
                 'title' => $validated['title'],
                 'year' => $validated['year'],
+                'tmdb_id' => $validated['tmdb_id'] ?? null,
                 'slug' => Media::generateUniqueSlug($validated['title'], $validated['year']),
                 'file_path' => $validated['file_path'],
                 'file_name' => $fileName,
@@ -164,6 +179,13 @@ class MediaAdminController extends Controller
             ]);
         }
 
+        // Fetch TMDB details automatically
+        try {
+            $this->tmdbService->fetchAndApply($media, $validated['tmdb_id'] ?? null);
+        } catch (\Exception $e) {
+            // Log fallback
+        }
+
         $this->auditLogService->log(
             action: 'media_manually_added',
             targetType: 'Media',
@@ -171,7 +193,50 @@ class MediaAdminController extends Controller
             newValues: $media->toArray()
         );
 
-        return back()->with('message', sprintf('"%s" kütüphaneye başarıyla eklendi.', $media->title));
+        return back()->with('message', sprintf('"%s" kütüphaneye ve TMDB sistemine başarıyla eklendi.', $media->title));
+    }
+
+    public function searchTmdb(Request $request): JsonResponse
+    {
+        $request->validate([
+            'query' => ['required', 'string', 'min:2'],
+            'type' => ['nullable', 'string', 'in:movie,series,episode,multi'],
+            'year' => ['nullable', 'integer'],
+        ]);
+
+        $type = $request->query('type', 'multi');
+        $results = $this->tmdbService->search($request->input('query'), $type, $request->input('year'));
+
+        return response()->json([
+            'status' => 'success',
+            'results' => array_slice($results, 0, 10),
+        ]);
+    }
+
+    public function syncTmdb(Request $request, Media $media): RedirectResponse
+    {
+        $tmdbId = $request->input('tmdb_id');
+        $success = $this->tmdbService->fetchAndApply($media, $tmdbId ? (int) $tmdbId : null);
+
+        if ($success) {
+            return back()->with('message', sprintf('"%s" TMDB bilgileri güncellendi.', $media->title));
+        }
+
+        return back()->with('error', sprintf('"%s" için TMDB bilgisi bulunamadı.', $media->title));
+    }
+
+    public function syncAllTmdb(): RedirectResponse
+    {
+        $allMedia = Media::whereNull('tmdb_id')->orWhereNull('overview')->get();
+        $count = 0;
+
+        foreach ($allMedia as $media) {
+            if ($this->tmdbService->fetchAndApply($media)) {
+                $count++;
+            }
+        }
+
+        return back()->with('message', sprintf('%d medya için TMDB bilgileri başarıyla çekildi.', $count));
     }
 
     public function destroy(Media $media): RedirectResponse

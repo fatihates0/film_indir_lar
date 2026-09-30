@@ -13,6 +13,7 @@ class MediaScannerService
 {
     public function __construct(
         protected StorageBoxService $storageBoxService,
+        protected TmdbService $tmdbService,
     ) {}
 
     /**
@@ -138,7 +139,7 @@ class MediaScannerService
                         Log::info("Metadata probe skipped for {$relativePath}: " . $e->getMessage());
                     }
 
-                    Media::create([
+                    $newMedia = Media::create([
                         'storage_box_id' => $storageBox?->id,
                         'type' => $type,
                         'title' => $title,
@@ -158,6 +159,14 @@ class MediaScannerService
                         'is_active' => true,
                         'is_available' => true,
                     ]);
+
+                    // Automatically fetch TMDB metadata for newly scanned media
+                    try {
+                        $this->tmdbService->fetchAndApply($newMedia);
+                    } catch (\Exception $e) {
+                        Log::info("TMDB auto-fetch failed for {$newMedia->title}: " . $e->getMessage());
+                    }
+
                     $added++;
                 } else {
                     // Update if size changed (to a valid positive size) or marked unavailable

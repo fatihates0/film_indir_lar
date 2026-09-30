@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\Media;
 use App\Services\DownloadAuthorizationService;
 use App\Services\QuotaService;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -22,25 +21,49 @@ class MediaController extends Controller
         $query = Media::where('is_active', true)->where('is_available', true);
 
         if ($search = $request->input('search')) {
-            $query->where('title', 'like', "%{$search}%");
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('original_title', 'like', "%{$search}%")
+                  ->orWhere('overview', 'like', "%{$search}%");
+            });
         }
 
         if ($type = $request->input('type')) {
             $query->where('type', $type);
         }
 
+        if ($genre = $request->input('genre')) {
+            $query->whereJsonContains('genres', $genre);
+        }
+
         $sort = $request->input('sort', 'created_at');
         $direction = $request->input('direction', 'desc');
-        $query->orderBy($sort, $direction);
 
-        $media = $query->paginate(16)->withQueryString();
+        if ($sort === 'rating') {
+            $query->orderBy('vote_average', $direction);
+        } elseif ($sort === 'year') {
+            $query->orderBy('year', $direction);
+        } else {
+            $query->orderBy('created_at', $direction);
+        }
+
+        $media = $query->paginate(20)->withQueryString();
 
         $user = $request->user();
         $quota = $this->quotaService->ensureCurrentPeriod($user);
 
+        // Get unique list of genres available in DB
+        $allGenres = Media::whereNotNull('genres')
+            ->pluck('genres')
+            ->flatten()
+            ->unique()
+            ->values()
+            ->toArray();
+
         return Inertia::render('Media/Index', [
             'media' => $media,
-            'filters' => $request->only(['search', 'type', 'sort', 'direction']),
+            'allGenres' => $allGenres,
+            'filters' => $request->only(['search', 'type', 'genre', 'sort', 'direction']),
             'quota' => [
                 'limit_bytes' => $quota->quota_limit_bytes,
                 'used_bytes' => $quota->used_bytes,
@@ -57,8 +80,18 @@ class MediaController extends Controller
         $user = $request->user();
         $quota = $this->quotaService->ensureCurrentPeriod($user);
 
+        // Fetch related media by genre or type
+        $related = Media::where('is_active', true)
+            ->where('is_available', true)
+            ->where('id', '!=', $media->id)
+            ->where('type', $media->type)
+            ->orderBy('id', 'desc')
+            ->take(6)
+            ->get();
+
         return Inertia::render('Media/Show', [
             'item' => $media,
+            'related' => $related,
             'quota' => [
                 'limit_bytes' => $quota->quota_limit_bytes,
                 'used_bytes' => $quota->used_bytes,
