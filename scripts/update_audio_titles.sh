@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Storage Box MKV Ses Başlığı Güncelleme Betiği (TSI) - v1.1
+# Storage Box MKV Ses Başlığı Güncelleme Betiği (TSI) - v1.2
 # ==============================================================================
 # Seçilen Storage Box veya dizindeki tüm .mkv dosyalarını tarar,
 # ses dosyalarının başlıklarını "TSI" yapar (ses dillerini DEĞİŞTİRMEZ).
@@ -18,9 +18,9 @@ NC='\033[0m' # Renksiz
 if ! command -v mkvpropedit &>/dev/null || ! command -v mkvmerge &>/dev/null; then
     echo -e "${YELLOW}[BİLGİ] Sunucuda 'mkvtoolnix' (mkvpropedit) paketi eksik. Otomatik yükleniyor...${NC}"
     if command -v apt-get &>/dev/null; then
-        apt-get update -qq && apt-get install -y -qq mkvtoolnix
+        apt-get update -qq && apt-get install -y -qq mkvtoolnix python3
     elif command -v yum &>/dev/null; then
-        yum install -y mkvtoolnix
+        yum install -y mkvtoolnix python3
     else
         echo -e "${RED}[HATA] mkvtoolnix otomatik yüklenemedi. Lütfen 'apt install mkvtoolnix' komutu ile kurun.${NC}"
         exit 1
@@ -71,40 +71,38 @@ get_storageboxes() {
     fi
 }
 
-# Python3 yardımı ile ses izlerinin UID'lerini al
-get_audio_uids() {
+# MKV dosyasındaki ses izlerinin track numaralarını tespit et (properties.number)
+get_audio_track_numbers() {
     local file="$1"
+    local nums=()
+
     if command -v python3 &>/dev/null; then
-        python3 -c "
+        while IFS= read -r line; do
+            [ -n "$line" ] && nums+=("$line")
+        done < <(python3 -c "
 import json, sys, subprocess
 try:
     res = subprocess.run(['mkvmerge', '-J', sys.argv[1]], capture_output=True, text=True)
     data = json.loads(res.stdout)
     for t in data.get('tracks', []):
         if t.get('type') == 'audio':
-            uid = t.get('properties', {}).get('uid')
-            if uid:
-                print(uid)
+            num = t.get('properties', {}).get('number')
+            if num is None:
+                num = t.get('id', 0) + 1
+            print(num)
 except Exception:
     pass
-" "$file" 2>/dev/null
-    fi
-}
-
-# MKV dosyasındaki ses izi sayısını bul
-get_audio_track_count() {
-    local file="$1"
-    local count=0
-
-    if command -v mkvmerge &>/dev/null; then
-        count=$(mkvmerge -J "$file" 2>/dev/null | grep -c '"type": "audio"')
-    elif command -v ffprobe &>/dev/null; then
-        count=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$file" 2>/dev/null | wc -l)
-    else
-        count=1
+" "$file" 2>/dev/null)
     fi
 
-    echo "$count" | tr -d ' '
+    # Eğer python çıktısı boş kaldıysa mkvmerge json parse fallback
+    if [ ${#nums[@]} -eq 0 ] && command -v mkvmerge &>/dev/null; then
+        while IFS= read -r line; do
+            [ -n "$line" ] && nums+=("$line")
+        done < <(mkvmerge -J "$file" 2>/dev/null | grep -B 2 -A 10 '"type": "audio"' | grep '"number":' | awk -F': ' '{print $2}' | tr -d ', ')
+    fi
+
+    echo "${nums[@]}"
 }
 
 # Ana Başlık Ekranı
@@ -213,34 +211,26 @@ for file in "${FILES[@]}"; do
         continue
     fi
 
-    # Önce UID bazlı argüman oluşturmayı dene
-    UIDS=($(get_audio_uids "$file"))
-    ARGS=()
+    # Ses izlerinin track numaralarını al
+    TRACK_NUMS=($(get_audio_track_numbers "$file"))
 
-    if [ ${#UIDS[@]} -gt 0 ]; then
-        TRACK_COUNT=${#UIDS[@]}
-        for uid in "${UIDS[@]}"; do
-            ARGS+=(--edit "track:@$uid" --set "title=TSI")
-        done
-    else
-        AUDIO_COUNT=$(get_audio_track_count "$file")
-        TRACK_COUNT=$AUDIO_COUNT
-        if [ "$AUDIO_COUNT" -le 0 ]; then
-            echo -e "   ${YELLOW}└─► Ses izi bulunamadı, atlanıyor.${NC}"
-            SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
-            continue
-        fi
-        for (( i=1; i<=AUDIO_COUNT; i++ )); do
-            ARGS+=(--edit "track:a$i" --set "title=TSI")
-        done
+    if [ ${#TRACK_NUMS[@]} -eq 0 ]; then
+        echo -e "   ${YELLOW}└─► Ses izi bulunamadı, atlanıyor.${NC}"
+        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        continue
     fi
+
+    ARGS=()
+    for num in "${TRACK_NUMS[@]}"; do
+        ARGS+=(--edit "track:$num" --set "title=TSI")
+    done
 
     # mkvpropedit çalıştır ve çıktıyı yakala
     ERR_OUTPUT=$(mkvpropedit "$file" "${ARGS[@]}" 2>&1)
     EXIT_CODE=$?
 
     if [ $EXIT_CODE -eq 0 ]; then
-        echo -e "   ${GREEN}└─► ✔ Başarılı ($TRACK_COUNT ses izi başlığı 'TSI' yapıldı, dil korundu)${NC}"
+        echo -e "   ${GREEN}└─► ✔ Başarılı (${#TRACK_NUMS[@]} ses izi başlığı 'TSI' yapıldı, dil korundu)${NC}"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
         CLEAN_ERR=$(echo "$ERR_OUTPUT" | tr '\n' ' ' | sed 's/  */ /g')
