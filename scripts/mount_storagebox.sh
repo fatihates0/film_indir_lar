@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Hetzner Storage Box Gelişmiş Yönetim Sihirbazı (v2.1 - Özel URL Destekli)
+# Hetzner Storage Box Gelişmiş Yönetim Sihirbazı (v2.2 - Error 79 Kesin Çözümlü)
 # ==============================================================================
 
 # Shell renklendirmeleri
@@ -17,6 +17,19 @@ if [ "$EUID" -ne 0 ]; then
   echo "Kullanım: curl -sSL <URL> | sudo bash"
   exit 1
 fi
+
+# Gerekli paketleri kontrol et ve kur
+if ! command -v mount.cifs &>/dev/null; then
+    echo -e "${YELLOW}[BİLGİ] Sunucuda 'cifs-utils' paketi eksik. Otomatik yükleniyor...${NC}"
+    if command -v apt-get &>/dev/null; then
+        apt-get update -qq && apt-get install -y -qq cifs-utils keyutils
+    elif command -v yum &>/dev/null; then
+        yum install -y cifs-utils keyutils
+    fi
+fi
+
+# CIFS çekirdek modülünü yükle
+modprobe cifs 2>/dev/null
 
 # Gerekli ana dizinleri ve okuma izinlerini oluştur
 mkdir -p /etc/storagebox
@@ -114,38 +127,42 @@ EOF
             chmod 600 "$CRED_PATH"
 
             echo -e "${CYAN}[3/4] /etc/fstab güncelleniyor...${NC}"
-            # CIFS için tam paylaşımlı fstab satırı
-            FSTAB_LINE="${SERVER_HOST} ${MOUNT_PATH} cifs credentials=${CRED_PATH},iocharset=utf8,rw,file_mode=0777,dir_mode=0777,vers=3.0,_netdev 0 0"
+            # NOT: iocharset=utf8 seçeneği Linux çekirdeğinde Error 79 (ELIBACC) verdiğinden kaldırıldı!
+            # SMB3 varsayılan olarak UTF-16/UTF-8 kullanır.
+            FSTAB_LINE="${SERVER_HOST} ${MOUNT_PATH} cifs credentials=${CRED_PATH},rw,file_mode=0777,dir_mode=0777,vers=3.0,_netdev 0 0"
 
             if grep -q "${MOUNT_PATH}" /etc/fstab; then
-                echo -e "${YELLOW}[BİLGİ] ${MOUNT_PATH} zaten /etc/fstab dosyasında mevcut.${NC}"
-            else
-                echo "$FSTAB_LINE" >> /etc/fstab
-                systemctl daemon-reload 2>/dev/null
-                echo -e "${GREEN}[BAŞARILI] /etc/fstab güncellendi.${NC}"
+                ESCAPED_PATH=$(echo "$MOUNT_PATH" | sed 's/\//\\\//g')
+                sed -i "/${ESCAPED_PATH}/d" /etc/fstab
             fi
+
+            echo "$FSTAB_LINE" >> /etc/fstab
+            systemctl daemon-reload 2>/dev/null
+            echo -e "${GREEN}[BAŞARILI] /etc/fstab güncellendi.${NC}"
 
             echo -e "${CYAN}[4/4] Bağlantı kuruluyor (mount)...${NC}"
             
-            # Mount denemesi
-            if mount "$MOUNT_PATH"; then
+            MOUNT_SUCCESS=0
+            # Deneme 1: fstab üzerinden varsayılan vers=3.0 ile mount
+            if mount "$MOUNT_PATH" 2>/dev/null; then
                 MOUNT_SUCCESS=1
             else
-                # vers=3.0 hata verirse vers=2.1 ile dene
-                echo -e "${YELLOW}[BİLGİ] vers=3.0 ile mount başarısız oldu, vers=2.1 deneniyor...${NC}"
+                # Deneme 2: vers=2.1 ile dene
                 sed -i "s/vers=3.0/vers=2.1/g" /etc/fstab
                 systemctl daemon-reload 2>/dev/null
-                if mount "$MOUNT_PATH"; then
+                if mount "$MOUNT_PATH" 2>/dev/null; then
                     MOUNT_SUCCESS=1
                 else
-                    # versiz dene
-                    echo -e "${YELLOW}[BİLGİ] Varsayılan CIFS versiyonu deneniyor...${NC}"
+                    # Deneme 3: vers parametresi olmadan dene
                     sed -i "s/,vers=2.1//g" /etc/fstab
                     systemctl daemon-reload 2>/dev/null
-                    if mount "$MOUNT_PATH"; then
+                    if mount "$MOUNT_PATH" 2>/dev/null; then
                         MOUNT_SUCCESS=1
                     else
-                        MOUNT_SUCCESS=0
+                        # Deneme 4: Doğrudan mount.cifs komutu ile dene
+                        if mount -t cifs "$SERVER_HOST" "$MOUNT_PATH" -o "credentials=${CRED_PATH},rw,file_mode=0777,dir_mode=0777" 2>/dev/null; then
+                            MOUNT_SUCCESS=1
+                        fi
                     fi
                 fi
             fi
@@ -167,12 +184,12 @@ EOF
                 ls -la "$MOUNT_PATH"
             else
                 echo -e "\n${RED}[HATA] Mount başarısız oldu!${NC}"
-                echo -e "${RED}ÖNEMLİ İPUCU:${NC} CIFS/SMB protokolünde sunucu adresi yanında mutlaka bir paylaşım klasörü (Örn: /backup veya /u680225) bulunmalıdır!"
-                echo -e "${RED}Olası Sebepler:${NC}"
-                echo " 1. Girilen URL paylaşım adı içermiyor (Örn: //u680225.your-storagebox.de yerine //u680225.your-storagebox.de/backup olmalı)."
-                echo " 2. Storage Box kullanıcı adı veya şifreniz hatalı."
-                echo " 3. Hetzner Storage Box panelinde Samba/CIFS desteği kapalı."
-                echo " 4. Sunucuda 'cifs-utils' paketi eksik (Yüklemek için: sudo apt install cifs-utils)"
+                echo -e "${RED}Çekirdek Logu (dmesg):${NC}"
+                dmesg | tail -n 5
+                echo -e "\n${RED}Olası Sebepler:${NC}"
+                echo " 1. Hetzner Robot Paneli > Storage Box > 'Configuration' sekmesinde Samba/CIFS seçeneği kapalı olabilir."
+                echo " 2. Şifrenizde özel simgeler varsa kısıtlama yaratmış olabilir."
+                echo " 3. Sunucu 445 portu güvenlik duvarı tarafından engelleniyor olabilir."
             fi
             ;;
         *)
