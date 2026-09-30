@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# Storage Box MKV Ses Başlığı Güncelleme Betiği (TSI) - v1.3
+# Storage Box MKV Görüntü ve Ses Başlığı Güncelleme Betiği (TSI) - v2.0
 # ==============================================================================
 # Seçilen Storage Box veya dizindeki tüm .mkv dosyalarını tarar,
-# ses dosyalarının başlıklarını "TSI" yapar (ses dillerini DEĞİŞTİRMEZ).
+# görüntü ve ses izlerinin başlıklarını "TSI" yapar (dillerini DEĞİŞTİRMEZ).
 # ==============================================================================
 
 # Shell renklendirmeleri
@@ -71,8 +71,8 @@ get_storageboxes() {
     fi
 }
 
-# MKV dosyasındaki ses izlerinin track numaralarını tespit et (properties.number)
-get_audio_track_numbers() {
+# MKV dosyasındaki görüntü ve ses izlerinin track numaralarını tespit et (properties.number)
+get_video_audio_track_numbers() {
     local file="$1"
     local nums=()
 
@@ -85,7 +85,7 @@ try:
     res = subprocess.run(['mkvmerge', '-J', sys.argv[1]], capture_output=True, text=True)
     data = json.loads(res.stdout)
     for t in data.get('tracks', []):
-        if t.get('type') == 'audio':
+        if t.get('type') in ('video', 'audio'):
             num = t.get('properties', {}).get('number')
             if num is None:
                 num = t.get('id', 0) + 1
@@ -99,7 +99,7 @@ except Exception:
     if [ ${#nums[@]} -eq 0 ] && command -v mkvmerge &>/dev/null; then
         while IFS= read -r line; do
             [ -n "$line" ] && nums+=("$line")
-        done < <(mkvmerge -J "$file" 2>/dev/null | grep -B 2 -A 10 '"type": "audio"' | grep '"number":' | awk -F': ' '{print $2}' | tr -d ', ')
+        done < <(mkvmerge -J "$file" 2>/dev/null | grep -B 2 -A 10 -E '"type": "(video|audio)"' | grep '"number":' | awk -F': ' '{print $2}' | tr -d ', ')
     fi
 
     echo "${nums[@]}"
@@ -108,7 +108,7 @@ except Exception:
 # Ana Başlık Ekranı
 clear 2>/dev/null || true
 echo -e "${CYAN}=====================================================${NC}"
-echo -e "${CYAN}   STORAGE BOX MKV SES BAŞLIĞI GÜNCELLEME (TSI)     ${NC}"
+echo -e "${CYAN}   STORAGE BOX MKV GÖRÜNTÜ VE SES BAŞLIĞI (TSI)    ${NC}"
 echo -e "${CYAN}=====================================================${NC}"
 
 get_storageboxes
@@ -178,8 +178,8 @@ fi
 
 echo -e "${GREEN}✔ Toplam $TOTAL adet .mkv dosyası tespit edildi.${NC}\n"
 echo -e "${YELLOW}-----------------------------------------------------------------${NC}"
-echo -e "${BOLD}DİKKAT:${NC} Tüm .mkv dosyalarındaki ses izlerinin başlığı '${BOLD}TSI${NC}' yapılacaktır."
-echo -e "${BOLD}Ses dili (language) değiştirilmeyecek, aynen korunacaktır.${NC}"
+echo -e "${BOLD}DİKKAT:${NC} Tüm .mkv dosyalarındaki görüntü ve ses izlerinin başlığı '${BOLD}TSI${NC}' yapılacaktır."
+echo -e "${BOLD}Görüntü ve ses dilleri (language) değiştirilmeyecek, aynen korunacaktır.${NC}"
 echo -e "${YELLOW}-----------------------------------------------------------------${NC}\n"
 
 read -p "İşlemi başlatmak istiyor musunuz? [E/h]: " CONFIRM < /dev/tty
@@ -190,7 +190,7 @@ if [[ ! "$CONFIRM" =~ ^[EeYy]$ ]]; then
     exit 0
 fi
 
-echo -e "\n${CYAN}[2/3] Ses başlıkları 'TSI' olarak güncelleniyor...${NC}"
+echo -e "\n${CYAN}[2/3] Görüntü ve ses başlıkları 'TSI' olarak güncelleniyor...${NC}"
 
 SUCCESS_COUNT=0
 SKIPPED_COUNT=0
@@ -211,11 +211,11 @@ for file in "${FILES[@]}"; do
         continue
     fi
 
-    # Ses izlerinin track numaralarını al
-    TRACK_NUMS=($(get_audio_track_numbers "$file"))
+    # Görüntü ve ses izlerinin track numaralarını al
+    TRACK_NUMS=($(get_video_audio_track_numbers "$file"))
 
     if [ ${#TRACK_NUMS[@]} -eq 0 ]; then
-        echo -e "   ${YELLOW}└─► Ses izi bulunamadı, atlanıyor.${NC}"
+        echo -e "   ${YELLOW}└─► Görüntü/Ses izi bulunamadı, atlanıyor.${NC}"
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
         continue
     fi
@@ -230,7 +230,7 @@ for file in "${FILES[@]}"; do
     EXIT_CODE=$?
 
     if [ $EXIT_CODE -eq 0 ]; then
-        echo -e "   ${GREEN}└─► ✔ Başarılı (${#TRACK_NUMS[@]} ses izi başlığı 'TSI' yapıldı, dil korundu)${NC}"
+        echo -e "   ${GREEN}└─► ✔ Başarılı (${#TRACK_NUMS[@]} iz [görüntü + ses] başlığı 'TSI' yapıldı, diller korundu)${NC}"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
         CLEAN_ERR=$(echo "$ERR_OUTPUT" | tr '\n' ' ' | sed 's/  */ /g')
@@ -245,6 +245,6 @@ echo -e "${CYAN}[3/3] İŞLEM TAMAMLANDI                              ${NC}"
 echo -e "${CYAN}=====================================================${NC}"
 echo -e " Toplam Dosya     : ${BOLD}$TOTAL${NC}"
 echo -e " Başarılı         : ${GREEN}$SUCCESS_COUNT${NC}"
-echo -e " Ses Yok (Atlanan): ${YELLOW}$SKIPPED_COUNT${NC}"
+echo -e " İz Yok (Atlanan) : ${YELLOW}$SKIPPED_COUNT${NC}"
 echo -e " Hatalı           : ${RED}$FAIL_COUNT${NC}"
 echo -e "=====================================================\n"
