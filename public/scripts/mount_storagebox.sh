@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Hetzner Storage Box Gelişmiş Yönetim Sihirbazı
+# Hetzner Storage Box Gelişmiş Yönetim Sihirbazı (v2.0 - Hata Düzeltmeli)
 # ==============================================================================
 
 # Shell renklendirmeleri
@@ -18,8 +18,10 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Gerekli ana dizinleri ve okuma izinlerini oluştur
 mkdir -p /etc/storagebox
 mkdir -p /mnt/storageboxes
+chmod 755 /mnt /mnt/storageboxes
 
 # ------------------------------------------------------------------------------
 # Fonksiyon: Storage Box Bağlantılarını ve Durumlarını Listele
@@ -29,7 +31,6 @@ list_storageboxes() {
     echo -e "${CYAN}     MEVCUT STORAGE BOX BAĞLANTILARI VE DURUMU        ${NC}"
     echo -e "${CYAN}=====================================================${NC}\n"
 
-    # fstab içerisindeki cifs veya storagebox kayıtlarını bul
     ENTRIES=$(grep -E 'cifs|storagebox' /etc/fstab | grep -v '^#')
 
     if [ -z "$ENTRIES" ]; then
@@ -77,7 +78,7 @@ add_storagebox() {
         return
     fi
 
-    # Takılmaları ve çakışmaları önlemek için /mnt/storageboxes/ altını kullanıyoruz
+    # Mount yolu belirleme
     MOUNT_PATH="/mnt/storageboxes/${FOLDER_NAME}"
     CRED_PATH="/etc/storagebox/cred_${FOLDER_NAME}"
     SERVER_HOST="${USERNAME}.your-storagebox.de"
@@ -91,8 +92,9 @@ add_storagebox() {
     read -p "Onaylıyor musunuz? (e/h): " CONFIRM < /dev/tty
     case "$CONFIRM" in
         [eE][vV][eE][tT]|[eE]|[yY][eE][sS]|[yY])
-            echo -e "\n${CYAN}[1/4] Klasör oluşturuluyor (${MOUNT_PATH})...${NC}"
+            echo -e "\n${CYAN}[1/4] Mount klasörü oluşturuluyor ve izinler ayarlanıyor...${NC}"
             mkdir -p "$MOUNT_PATH"
+            chmod 777 "$MOUNT_PATH"
 
             echo -e "${CYAN}[2/4] Kimlik (credentials) dosyası yazılıyor...${NC}"
             cat <<EOF > "$CRED_PATH"
@@ -102,22 +104,62 @@ EOF
             chmod 600 "$CRED_PATH"
 
             echo -e "${CYAN}[3/4] /etc/fstab güncelleniyor...${NC}"
-            FSTAB_LINE="//${SERVER_HOST}/backup ${MOUNT_PATH} cifs credentials=${CRED_PATH},iocharset=utf8,rw,file_mode=0775,dir_mode=0775,noperm,_netdev 0 0"
+            # Hetzner CIFS için en uyumlu ve yetki sorunu yaşatmayan parametreler (vers=3.0, file_mode=0777, dir_mode=0777)
+            FSTAB_LINE="//${SERVER_HOST}/backup ${MOUNT_PATH} cifs credentials=${CRED_PATH},iocharset=utf8,rw,file_mode=0777,dir_mode=0777,vers=3.0,_netdev 0 0"
 
             if grep -q "${MOUNT_PATH}" /etc/fstab; then
                 echo -e "${YELLOW}[BİLGİ] ${MOUNT_PATH} zaten /etc/fstab dosyasında mevcut.${NC}"
             else
                 echo "$FSTAB_LINE" >> /etc/fstab
-                systemctl daemon-reload
-                echo -e "${GREEN}[BAŞARILI] /etc/fstab güncellendi ve systemd yenilendi.${NC}"
+                systemctl daemon-reload 2>/dev/null
+                echo -e "${GREEN}[BAŞARILI] /etc/fstab güncellendi.${NC}"
             fi
 
             echo -e "${CYAN}[4/4] Bağlantı kuruluyor (mount)...${NC}"
+            
+            # Mount denemesi
             if mount "$MOUNT_PATH"; then
-                echo -e "\n${GREEN}[BAŞARILI] Storage Box bağlandı: ${MOUNT_PATH}${NC}"
+                MOUNT_SUCCESS=1
+            else
+                # vers=3.0 hata verirse varsayılan CIFS versiyonu ile dene
+                echo -e "${YELLOW}[BİLGİ] vers=3.0 ile mount başarısız oldu, alternatif versiyon deneniyor...${NC}"
+                sed -i "s/vers=3.0/vers=2.1/g" /etc/fstab
+                systemctl daemon-reload 2>/dev/null
+                if mount "$MOUNT_PATH"; then
+                    MOUNT_SUCCESS=1
+                else
+                    # versiz dene
+                    sed -i "s/,vers=2.1//g" /etc/fstab
+                    systemctl daemon-reload 2>/dev/null
+                    if mount "$MOUNT_PATH"; then
+                        MOUNT_SUCCESS=1
+                    else
+                        MOUNT_SUCCESS=0
+                    fi
+                fi
+            fi
+
+            if [ "$MOUNT_SUCCESS" -eq 1 ]; then
+                chmod 777 "$MOUNT_PATH"
+                echo -e "\n${GREEN}=====================================================${NC}"
+                echo -e "${GREEN}  BAŞARILI! Storage Box bağlandı: ${MOUNT_PATH}${NC}"
+                echo -e "${GREEN}=====================================================${NC}\n"
+                
+                # Jellyfin Docker uyarısı & Otomatik Yeniden Başlatma
+                if command -v docker &>/dev/null && docker ps | grep -q jellyfin; then
+                    echo -e "${YELLOW}[BİLGİ] Jellyfin Docker konteyneri tespit edildi.${NC}"
+                    echo -e "${CYAN}Jellyfin'in yeni eklenen mount diskini görebilmesi için konteyner yeniden başlatılıyor...${NC}"
+                    docker restart jellyfin &>/dev/null
+                    echo -e "${GREEN}[BAŞARILI] Jellyfin yeniden başlatıldı!${NC}\n"
+                fi
+                
                 ls -la "$MOUNT_PATH"
             else
-                echo -e "\n${RED}[HATA] Mount başarısız! Bilgileri ve internet bağlantısını kontrol edin.${NC}"
+                echo -e "\n${RED}[HATA] Mount başarısız oldu!${NC}"
+                echo -e "${RED}Olası Sebepler:${NC}"
+                echo " 1. Storage Box kullanıcı adı veya şifreniz hatalı."
+                echo " 2. Hetzner Storage Box panellerinde CIFS/SMB seçeneği kapalı."
+                echo " 3. Sunucunuzda 'cifs-utils' paketi eksik (Yüklemek için: sudo apt install cifs-utils)"
             fi
             ;;
         *)
@@ -128,7 +170,7 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# Fonksiyon: Storage Box Bağlantısını Sök ve Kaldır
+# Fonksiyon: Storage Box Bağlantısını Sök ve Kaldır (Numaralı Seçim Destekli)
 # ------------------------------------------------------------------------------
 remove_storagebox() {
     echo -e "\n${CYAN}----------------- STORAGE BOX KALDIR / SÖK -----------------${NC}\n"
@@ -141,40 +183,59 @@ remove_storagebox() {
         return
     fi
 
-    echo "Kaldırmak istediğiniz Storage Box'ın Mount Konumunu veya Klasör Adını yazın:"
-    echo "Mevcut Konumlar:"
-    echo "$ENTRIES" | awk '{print " - " $2}'
+    echo -e "${YELLOW}Kaldırmak istediğiniz Storage Box'ı seçin:${NC}\n"
+
+    # Diziyi doldur ve ekrana numaralandırarak bas
+    MOUNT_LIST=()
+    COUNT=1
+    while read -r line; do
+        MP=$(echo "$line" | awk '{print $2}')
+        REMOTE=$(echo "$line" | awk '{print $1}')
+        MOUNT_LIST+=("$MP")
+        echo -e " ${CYAN}${COUNT})${NC} ${MP} (${REMOTE})"
+        COUNT=$((COUNT + 1))
+    done <<< "$ENTRIES"
+
     echo ""
+    read -p "Kaldırılacak numara (1-${#MOUNT_LIST[@]}) veya klasör adı/yolu: " TARGET_INPUT < /dev/tty
 
-    read -p "Kaldırılacak Konum (Örn: /mnt/storageboxes/box1 veya box1): " TARGET < /dev/tty
-
-    if [ -z "$TARGET" ]; then
-        echo -e "${RED}[HATA] Geçerli bir konum girmediniz.${NC}"
+    if [ -z "$TARGET_INPUT" ]; then
+        echo -e "${RED}[HATA] Geçerli bir seçim girmediniz.${NC}"
         read -p "Devam etmek için Enter'a basın..." dummy < /dev/tty
         return
     fi
 
-    # Tam yol değilse tamamla
-    if [[ "$TARGET" != /* ]]; then
-        TARGET="/mnt/storageboxes/${TARGET}"
+    # Numaralı seçim mi kontrol et
+    if [[ "$TARGET_INPUT" =~ ^[0-9]+$ ]] && [ "$TARGET_INPUT" -ge 1 ] && [ "$TARGET_INPUT" -le "${#MOUNT_LIST[@]}" ]; then
+        INDEX=$((TARGET_INPUT - 1))
+        TARGET="${MOUNT_LIST[$INDEX]}"
+    else
+        TARGET="$TARGET_INPUT"
+        if [[ "$TARGET" != /* ]]; then
+            TARGET="/mnt/storageboxes/${TARGET}"
+        fi
     fi
 
-    read -p "${RED}UYARI:${NC} ${TARGET} bağlantısı sökülecek ve /etc/fstab kaydı silinecek. Onaylıyor musunuz? (e/h): " CONFIRM < /dev/tty
+    read -p "$(echo -e "${RED}UYARI:${NC} ${TARGET} bağlantısı sökülecek ve /etc/fstab kaydı silinecek. Onaylıyor musunuz? (e/h): ")" CONFIRM < /dev/tty
     case "$CONFIRM" in
         [eE][vV][eE][tT]|[eE]|[yY][eE][sS]|[yY])
-            echo -e "\n${CYAN}[1/3] Mount bağlantısı kesiliyor (umount)...${NC}"
+            echo -e "\n${CYAN}[1/4] Mount bağlantısı kesiliyor (umount)...${NC}"
             umount -f -l "$TARGET" 2>/dev/null
 
-            echo -e "${CYAN}[2/3] /etc/fstab kaydı temizleniyor...${NC}"
-            # Hedef satırı fstab'dan sil
-            sed -i "\|${TARGET}|d" /etc/fstab
-            systemctl daemon-reload
+            echo -e "${CYAN}[2/4] /etc/fstab kaydı temizleniyor...${NC}"
+            # Hedef fstab satırını sil (özel karakterleri koruyarak)
+            ESCAPED_TARGET=$(echo "$TARGET" | sed 's/\//\\\//g')
+            sed -i "/${ESCAPED_TARGET}/d" /etc/fstab
+            systemctl daemon-reload 2>/dev/null
 
-            echo -e "${CYAN}[3/3] İlişkili kimlik dosyası siliniyor...${NC}"
+            echo -e "${CYAN}[3/4] İlişkili kimlik dosyası siliniyor...${NC}"
             FOLDER_NAME=$(basename "$TARGET")
             rm -f "/etc/storagebox/cred_${FOLDER_NAME}"
 
-            echo -e "\n${GREEN}[BAŞARILI] ${TARGET} bağlantısı başarıyla kaldırıldı!${NC}\n"
+            echo -e "${CYAN}[4/4] Boş klasör temizleniyor...${NC}"
+            rmdir "$TARGET" 2>/dev/null
+
+            echo -e "\n${GREEN}[BAŞARILI] ${TARGET} bağlantısı ve kaydı başarıyla kaldırıldı!${NC}\n"
             ;;
         *)
             echo -e "\n${YELLOW}İşlem iptal edildi.${NC}"
