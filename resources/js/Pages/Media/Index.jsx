@@ -4,7 +4,7 @@ import axios from 'axios';
 import { useState } from 'react';
 
 export default function MediaIndex({ media, allGenres = [], filters = {}, quota = {} }) {
-    // Sanitize props against browser extensions or null props
+    // Sanitize props
     const rawFilters = (filters && typeof filters === 'object') ? filters : {};
     const rawQuota = (quota && typeof quota === 'object') ? quota : {};
     const rawMedia = (media && typeof media === 'object') ? media : { data: [], total: 0, links: [] };
@@ -21,6 +21,9 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
     const [downloadModal, setDownloadModal] = useState(null);
     const [copied, setCopied] = useState(false);
 
+    // Featured Hero Item (first item with backdrop or first item in list)
+    const featuredItem = mediaList.find(item => item.backdrop_url || item.poster_url) || mediaList[0];
+
     const handleSearch = (e) => {
         if (e && typeof e.preventDefault === 'function') {
             e.preventDefault();
@@ -28,6 +31,24 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
         router.get(
             route('media.index'),
             { search, type, genre, sort: sortBy },
+            { preserveState: true, replace: true }
+        );
+    };
+
+    const handleTypeChange = (newType) => {
+        setType(newType);
+        router.get(
+            route('media.index'),
+            { search, type: newType, genre, sort: sortBy },
+            { preserveState: true, replace: true }
+        );
+    };
+
+    const handleGenreChange = (newGenre) => {
+        setGenre(newGenre);
+        router.get(
+            route('media.index'),
+            { search, type, genre: newGenre, sort: sortBy },
             { preserveState: true, replace: true }
         );
     };
@@ -67,298 +88,392 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
     return (
         <AuthenticatedLayout
             header={
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
-                        <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                        <h1 className="font-display font-black text-3xl text-white tracking-tight flex items-center gap-3">
                             <span>Film & Dizi Kütüphanesi</span>
-                            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                                {rawMedia.total || mediaList.length || 0} İçerik
+                            <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                {rawMedia.total || mediaList.length || 0} İçerik Mevcut
                             </span>
-                        </h2>
-                        <p className="text-xs text-slate-400 mt-1">Yüksek çözünürlüklü filmleri ve dizileri IDM ile tam hızda indirin.</p>
+                        </h1>
+                        <p className="text-xs text-slate-400 mt-1">4K Ultra HD ve Dual ses seçeneğiyle yüksek hızlı indirme kataloğu.</p>
                     </div>
 
-                    <div className="flex items-center gap-3 bg-slate-900/90 px-4 py-2 rounded-2xl border border-slate-800 shadow-sm text-xs">
+                    <div className="flex items-center gap-3 glass-panel px-4 py-2.5 rounded-2xl border border-white/10 text-xs">
                         <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold">
                             ⚡
                         </div>
                         <div>
-                            <div className="text-slate-400 text-[11px]">Kalan İndirme Kotanız</div>
+                            <div className="text-slate-400 text-[11px]">Kalan Kullanım Kotanız</div>
                             <div className="text-emerald-400 font-bold text-sm">{rawQuota.remaining_gb ?? 0} GB</div>
                         </div>
                     </div>
                 </div>
             }
         >
-            <Head title="Film & Dizi Kütüphanesi - CINEMAFLIX" />
+            <Head title="Film & Dizi Kütüphanesi - CINEBOX" />
 
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8">
-                {/* Search & Filter Toolbar */}
-                <form onSubmit={handleSearch} className="rounded-2xl bg-[#0f1422] border border-slate-800/80 p-4 shadow-xl space-y-3 md:space-y-0 md:flex md:items-center md:gap-3">
-                    <div className="flex-1 relative">
-                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                        </div>
-                        <input
-                            type="text"
-                            placeholder="Film, dizi adı veya konu ile ara..."
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/80 border-slate-800 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-                        />
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                        <select
-                            value={type}
-                            onChange={(e) => { setType(e.target.value); handleSearch(); }}
-                            className="rounded-xl bg-slate-950/80 border-slate-800 text-xs text-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 py-2.5"
-                        >
-                            <option value="">Tüm Türler</option>
-                            <option value="movie">🎬 Filmler</option>
-                            <option value="episode">📺 Diziler</option>
-                        </select>
-
-                        {safeGenres.length > 0 && (
-                            <select
-                                value={genre}
-                                onChange={(e) => { setGenre(e.target.value); handleSearch(); }}
-                                className="rounded-xl bg-slate-950/80 border-slate-800 text-xs text-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 py-2.5"
-                            >
-                                <option value="">Tüm Kategoriler</option>
-                                {safeGenres.map((g) => (
-                                    <option key={String(g)} value={String(g)}>{String(g)}</option>
-                                ))}
-                            </select>
-                        )}
-
-                        <select
-                            value={sortBy}
-                            onChange={(e) => { setSortBy(e.target.value); handleSearch(); }}
-                            className="col-span-2 md:col-span-1 rounded-xl bg-slate-950/80 border-slate-800 text-xs text-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 py-2.5"
-                        >
-                            <option value="created_at">En Son Eklenenler</option>
-                            <option value="rating">En Yüksek Puanlı</option>
-                            <option value="year">Yayın Yılı</option>
-                        </select>
-                    </div>
-
-                    <button
-                        type="submit"
-                        className="w-full md:w-auto rounded-xl bg-indigo-600 hover:bg-indigo-500 px-6 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition-all"
-                    >
-                        Ara
-                    </button>
-                </form>
-
                 {/* Error Banner */}
                 {errorMessage && (
-                    <div className="rounded-2xl bg-rose-500/10 border border-rose-500/30 p-4 text-xs text-rose-300 flex items-center justify-between shadow-lg">
-                        <span>{errorMessage}</span>
-                        <button onClick={() => setErrorMessage(null)} className="text-rose-400 hover:text-white font-bold text-lg">&times;</button>
+                    <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/30 text-rose-200 flex items-center justify-between animate-slide-up">
+                        <div className="flex items-center gap-3">
+                            <span className="text-xl">⚠️</span>
+                            <span className="text-sm font-semibold">{errorMessage}</span>
+                        </div>
+                        <button onClick={() => setErrorMessage(null)} className="text-slate-400 hover:text-white p-1">✕</button>
                     </div>
                 )}
 
-                {/* Media Posters Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
-                    {mediaList.length > 0 ? (
-                        mediaList.map((item) => (
-                            <div
-                                key={item.id}
-                                className="group relative rounded-2xl bg-[#0f1422] border border-slate-800/80 overflow-hidden flex flex-col hover:border-indigo-500/60 hover:shadow-2xl hover:shadow-indigo-950/50 transition-all duration-300"
-                            >
-                                {/* Media Poster Aspect Ratio */}
-                                <div className="relative aspect-[2/3] w-full bg-slate-950 overflow-hidden">
-                                    {item.poster_url ? (
-                                        <img
-                                            src={item.poster_url}
-                                            alt={item.title || ''}
-                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                                            loading="lazy"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-950 p-4 flex flex-col justify-between items-center text-center">
-                                            <div className="w-12 h-12 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mt-8">
-                                                🎬
-                                            </div>
-                                            <span className="font-bold text-sm text-slate-200 line-clamp-3">{item.title}</span>
-                                            <span className="text-[10px] text-slate-500">{item.year || 'N/A'}</span>
-                                        </div>
-                                    )}
+                {/* Hero Featured Spotlight Card (If available on first page) */}
+                {featuredItem && !search && !genre && !type && (
+                    <div className="relative rounded-3xl overflow-hidden glass-panel border border-white/10 min-h-[340px] flex items-end p-6 md:p-10 shadow-2xl group">
+                        <div 
+                            className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 group-hover:scale-105"
+                            style={{ backgroundImage: `url(${featuredItem.backdrop_url || featuredItem.poster_url || '/placeholder.jpg'})` }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/70 to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-[#08090d] via-[#08090d]/50 to-transparent" />
 
-                                    {/* Overlay Gradient */}
-                                    <div className="absolute inset-0 bg-gradient-to-t from-[#0f1422] via-transparent to-black/60 opacity-80 group-hover:opacity-90 transition-opacity"></div>
-
-                                    {/* Top Badges */}
-                                    <div className="absolute top-2 left-2 right-2 flex justify-between items-center z-10">
-                                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                                            item.type === 'movie'
-                                                ? 'bg-indigo-600/90 text-white shadow-md'
-                                                : 'bg-purple-600/90 text-white shadow-md'
-                                        }`}>
-                                            {item.type === 'movie' ? 'Film' : 'Dizi'}
-                                        </span>
-
-                                        {item.vote_average > 0 && (
-                                            <span className="px-2 py-0.5 rounded-md text-[11px] font-extrabold bg-black/80 backdrop-blur-md text-amber-400 border border-amber-500/30 flex items-center gap-1 shadow-md">
-                                                ★ {item.vote_average.toFixed(1)}
-                                            </span>
-                                        )}
-                                    </div>
-
-                                    {/* Play / Download Quick Hover Overlay */}
-                                    <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20 bg-black/40 backdrop-blur-[2px]">
-                                        <Link
-                                            href={route('media.show', item.id)}
-                                            className="h-10 w-10 rounded-full bg-slate-900/90 hover:bg-white hover:text-slate-950 text-white flex items-center justify-center transition-all shadow-xl"
-                                            title="Detayları Gör"
-                                        >
-                                            <svg className="w-5 h-5 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                            </svg>
-                                        </Link>
-
-                                        <button
-                                            onClick={() => handleDownload(item)}
-                                            disabled={loadingId === item.id}
-                                            className="h-10 w-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition-all shadow-xl shadow-indigo-600/50"
-                                            title="Doğrudan İndir"
-                                        >
-                                            {loadingId === item.id ? (
-                                                <span className="animate-spin text-xs">⌛</span>
-                                            ) : (
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                                </svg>
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Content Details */}
-                                <div className="p-3.5 flex-1 flex flex-col justify-between space-y-3">
-                                    <div>
-                                        <h3 className="font-bold text-sm text-white group-hover:text-indigo-300 transition-colors line-clamp-1">
-                                            {item.title}
-                                        </h3>
-                                        <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1 font-medium">
-                                            <span>{item.year || 'N/A'}</span>
-                                            <span className="text-slate-300 font-mono font-semibold">
-                                                {item.file_size ? (item.file_size / 1073741824).toFixed(2) : '0.00'} GB
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {/* Technical Specs Tags */}
-                                    <div className="flex flex-wrap gap-1 text-[10px] text-slate-400 font-mono">
-                                        {item.height && (
-                                            <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                                                {item.height >= 2160 ? '4K UHD' : item.height >= 1080 ? '1080p' : '720p'}
-                                            </span>
-                                        )}
-                                        {item.video_codec && (
-                                            <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 uppercase">
-                                                {item.video_codec}
-                                            </span>
-                                        )}
-                                    </div>
-
-                                    {/* Action Buttons */}
-                                    <div className="pt-2 border-t border-slate-800/80 flex gap-2">
-                                        <Link
-                                            href={route('media.show', item.id)}
-                                            className="flex-1 text-center rounded-xl bg-slate-800/80 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 py-2 transition-colors"
-                                        >
-                                            İncele
-                                        </Link>
-                                        <button
-                                            onClick={() => handleDownload(item)}
-                                            disabled={loadingId === item.id}
-                                            className="flex-1 inline-flex items-center justify-center gap-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold text-white py-2 shadow-sm transition-all"
-                                        >
-                                            İndir
-                                        </button>
-                                    </div>
-                                </div>
+                        <div className="relative z-10 max-w-2xl space-y-4 text-left">
+                            <div className="flex items-center gap-2">
+                                <span className="px-3 py-1 rounded-lg gradient-badge-4k text-[10px] uppercase font-bold tracking-wider">
+                                    ÖNE ÇIKAN İÇERİK
+                                </span>
+                                {featuredItem.tmdb_rating > 0 && (
+                                    <span className="px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md text-amber-400 text-xs font-bold border border-white/10 flex items-center gap-1">
+                                        ★ {featuredItem.tmdb_rating}
+                                    </span>
+                                )}
                             </div>
-                        ))
-                    ) : (
-                        <div className="col-span-full rounded-3xl bg-[#0f1422] border border-slate-800 p-16 text-center space-y-3">
-                            <div className="text-4xl">🔍</div>
-                            <h4 className="text-lg font-bold text-white">Aradığınız Kriterlere Uygun İçerik Bulunamadı</h4>
-                            <p className="text-xs text-slate-400">Arama kelimenizi değiştirebilir veya tüm türleri seçebilirsiniz.</p>
+
+                            <h2 className="font-display font-black text-3xl sm:text-5xl text-white tracking-tight leading-tight">
+                                {featuredItem.title}
+                            </h2>
+
+                            {featuredItem.overview && (
+                                <p className="text-slate-300 text-xs sm:text-sm line-clamp-2 leading-relaxed">
+                                    {featuredItem.overview}
+                                </p>
+                            )}
+
+                            <div className="flex items-center gap-4 pt-2">
+                                <Link
+                                    href={route('media.show', featuredItem.id)}
+                                    className="px-6 py-3 rounded-2xl gradient-button text-white font-bold text-xs sm:text-sm shadow-xl flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                    Detaylar & İzle
+                                </Link>
+
+                                <button
+                                    onClick={() => handleDownload(featuredItem)}
+                                    disabled={loadingId === featuredItem.id}
+                                    className="px-6 py-3 rounded-2xl glass-panel text-white font-bold text-xs sm:text-sm hover:border-white/30 transition-all flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    {loadingId === featuredItem.id ? 'Yetkilendiriliyor...' : 'Hızlı İndir'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Filter Controls & Search Toolbar */}
+                <div className="space-y-4">
+                    <form onSubmit={handleSearch} className="rounded-2xl glass-panel border border-white/10 p-3 sm:p-4 shadow-xl flex flex-col md:flex-row items-center gap-3">
+                        <div className="flex-1 w-full relative">
+                            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                            <input
+                                type="text"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Film veya dizi adı ile arayın..."
+                                className="w-full pl-10 pr-4 py-2.5 rounded-xl glass-input text-xs sm:text-sm text-white placeholder-slate-400"
+                            />
+                        </div>
+
+                        <div className="flex items-center gap-2 w-full md:w-auto">
+                            {/* Type selector */}
+                            <div className="flex p-1 rounded-xl bg-slate-950 border border-white/10 text-xs font-semibold">
+                                <button
+                                    type="button"
+                                    onClick={() => handleTypeChange('')}
+                                    className={`px-3 py-1.5 rounded-lg transition-all ${!type ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                                >
+                                    Tümü
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleTypeChange('movie')}
+                                    className={`px-3 py-1.5 rounded-lg transition-all ${type === 'movie' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                                >
+                                    Filmler
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleTypeChange('series')}
+                                    className={`px-3 py-1.5 rounded-lg transition-all ${type === 'series' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                                >
+                                    Diziler
+                                </button>
+                            </div>
+
+                            {/* Sort Selector */}
+                            <select
+                                value={sortBy}
+                                onChange={(e) => {
+                                    setSortBy(e.target.value);
+                                    router.get(route('media.index'), { search, type, genre, sort: e.target.value }, { preserveState: true, replace: true });
+                                }}
+                                className="py-2.5 px-3 rounded-xl glass-input text-xs text-white bg-slate-900 border border-white/10"
+                            >
+                                <option value="created_at" className="bg-slate-900 text-white">Son Eklenenler</option>
+                                <option value="rating" className="bg-slate-900 text-white">TMDB Puanı</option>
+                                <option value="title" className="bg-slate-900 text-white">Alfabetik (A-Z)</option>
+                                <option value="year" className="bg-slate-900 text-white">Yayın Yılı</option>
+                            </select>
+
+                            <button
+                                type="submit"
+                                className="px-5 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-lg shrink-0"
+                            >
+                                Ara
+                            </button>
+                        </div>
+                    </form>
+
+                    {/* Genre Pills */}
+                    {safeGenres.length > 0 && (
+                        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+                            <button
+                                onClick={() => handleGenreChange('')}
+                                className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                                    !genre ? 'bg-indigo-600 text-white shadow-glow-purple' : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
+                                }`}
+                            >
+                                Tüm Türler
+                            </button>
+                            {safeGenres.map((g) => (
+                                <button
+                                    key={g}
+                                    onClick={() => handleGenreChange(g)}
+                                    className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                                        genre === g ? 'bg-indigo-600 text-white shadow-glow-purple' : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
+                                    }`}
+                                >
+                                    {g}
+                                </button>
+                            ))}
                         </div>
                     )}
                 </div>
 
+                {/* Media Cards Grid */}
+                {mediaList.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
+                        {mediaList.map((item) => {
+                            const sizeGb = item.file_size ? (item.file_size / 1073741824).toFixed(1) : null;
+                            const isMovie = item.type === 'movie';
+
+                            return (
+                                <div
+                                    key={item.id}
+                                    className="group relative rounded-2xl glass-card overflow-hidden border border-white/5 hover:border-indigo-500/40 transition-all duration-300 flex flex-col"
+                                >
+                                    {/* Poster Container */}
+                                    <div className="relative aspect-[2/3] w-full overflow-hidden bg-slate-900">
+                                        <img
+                                            src={item.poster_url || '/placeholder.jpg'}
+                                            alt={item.title}
+                                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                            loading="lazy"
+                                        />
+
+                                        {/* Overlay Shadow */}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-transparent to-transparent opacity-80 group-hover:opacity-60 transition-opacity" />
+
+                                        {/* Quality & Rating Tags */}
+                                        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-1 z-10">
+                                            <span className="px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider bg-black/70 backdrop-blur-md text-white border border-white/10">
+                                                {isMovie ? 'Film' : 'Dizi'}
+                                            </span>
+
+                                            {item.tmdb_rating > 0 && (
+                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/70 backdrop-blur-md text-amber-400 border border-white/10 flex items-center gap-1">
+                                                    ★ {item.tmdb_rating}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {/* Center Quick Play Overlay Button */}
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20 bg-black/40 backdrop-blur-xs">
+                                            <Link
+                                                href={route('media.show', item.id)}
+                                                className="w-12 h-12 rounded-full gradient-button text-white flex items-center justify-center shadow-glow-purple hover:scale-110 transition-transform"
+                                            >
+                                                <svg className="w-5 h-5 fill-current translate-x-0.5" viewBox="0 0 24 24">
+                                                    <path d="M8 5v14l11-7z" />
+                                                </svg>
+                                            </Link>
+                                        </div>
+                                    </div>
+
+                                    {/* Content Info */}
+                                    <div className="p-3.5 flex-1 flex flex-col justify-between space-y-2 text-left bg-slate-950/40">
+                                        <div>
+                                            <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium mb-1">
+                                                <span>{item.year || '2024'}</span>
+                                                {sizeGb && <span className="font-mono text-indigo-300 font-bold">{sizeGb} GB</span>}
+                                            </div>
+                                            <Link href={route('media.show', item.id)}>
+                                                <h3 className="font-display font-bold text-sm text-white group-hover:text-indigo-300 transition-colors line-clamp-1">
+                                                    {item.title}
+                                                </h3>
+                                            </Link>
+                                            {item.original_title && item.original_title !== item.title && (
+                                                <div className="text-[10px] text-slate-400 truncate">{item.original_title}</div>
+                                            )}
+                                        </div>
+
+                                        <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                                            <Link
+                                                href={route('media.show', item.id)}
+                                                className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300"
+                                            >
+                                                İncele →
+                                            </Link>
+
+                                            <button
+                                                onClick={() => handleDownload(item)}
+                                                disabled={loadingId === item.id}
+                                                className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-[11px] font-bold transition-all border border-indigo-500/30 flex items-center gap-1"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                </svg>
+                                                {loadingId === item.id ? '...' : 'İndir'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <div className="py-20 text-center glass-panel rounded-3xl space-y-4">
+                        <div className="w-16 h-16 mx-auto rounded-full bg-slate-900 border border-white/10 flex items-center justify-center text-3xl">
+                            🔍
+                        </div>
+                        <h3 className="font-display font-bold text-lg text-white">İçerik Bulunamadı</h3>
+                        <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                            Arama kriterlerinize uygun içerik bulunamadı. Lütfen arama terimini değiştirin veya filtreleri temizleyin.
+                        </p>
+                        <button
+                            onClick={() => { setSearch(''); setType(''); setGenre(''); router.get(route('media.index')); }}
+                            className="px-4 py-2 rounded-xl gradient-button text-white text-xs font-bold"
+                        >
+                            Filtreleri Sıfırla
+                        </button>
+                    </div>
+                )}
+
                 {/* Pagination */}
-                {rawMedia.links && Array.isArray(rawMedia.links) && rawMedia.links.length > 3 && (
-                    <div className="flex justify-center gap-1 pt-6">
+                {rawMedia.links && rawMedia.links.length > 3 && (
+                    <div className="flex justify-center items-center gap-1.5 pt-6">
                         {rawMedia.links.map((link, idx) => (
-                            <Link
+                            <button
                                 key={idx}
-                                href={link.url || '#'}
-                                dangerouslySetInnerHTML={{ __html: link.label }}
-                                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                                disabled={!link.url || link.active}
+                                onClick={() => link.url && router.get(link.url, {}, { preserveState: true })}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
                                     link.active
-                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                                        ? 'bg-indigo-600 text-white shadow-glow-purple'
                                         : link.url
-                                        ? 'bg-slate-900 hover:bg-slate-800 text-slate-300'
-                                        : 'bg-slate-950 text-slate-600 cursor-not-allowed'
+                                        ? 'glass-panel text-slate-300 hover:bg-white/10 hover:text-white'
+                                        : 'opacity-40 cursor-not-allowed text-slate-600'
                                 }`}
+                                dangerouslySetInnerHTML={{ __html: link.label }}
                             />
                         ))}
                     </div>
                 )}
 
-                {/* Direct Download Signed URL Modal */}
+                {/* Download Authorization Modal */}
                 {downloadModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-                        <div className="w-full max-w-md rounded-3xl bg-[#121724] border border-slate-800 p-6 shadow-2xl space-y-5">
-                            <div className="flex justify-between items-start">
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+                        <div className="w-full max-w-lg glass-panel rounded-3xl border border-white/15 p-6 shadow-2xl space-y-6 text-left relative">
+                            <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
-                                    {downloadModal.poster_url && (
-                                        <img src={downloadModal.poster_url} alt="" className="w-12 h-16 object-cover rounded-xl border border-slate-700" />
-                                    )}
+                                    <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl font-bold">
+                                        ✓
+                                    </div>
                                     <div>
-                                        <h3 className="text-base font-bold text-white line-clamp-1">{downloadModal.title}</h3>
-                                        <div className="text-xs text-indigo-400 font-semibold mt-0.5">Boyut: {downloadModal.size_gb} GB</div>
+                                        <h3 className="font-display font-bold text-lg text-white">İndirme Bağlantısı Hazır!</h3>
+                                        <p className="text-xs text-slate-400">IDM ve yüksek hızlı indirme yöneticileri ile uyumludur.</p>
                                     </div>
                                 </div>
-                                <button onClick={() => setDownloadModal(null)} className="text-slate-400 hover:text-white font-bold text-xl">&times;</button>
+                                <button
+                                    onClick={() => setDownloadModal(null)}
+                                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5"
+                                >
+                                    ✕
+                                </button>
                             </div>
 
-                            <div className="rounded-2xl bg-slate-950 p-4 border border-slate-800 space-y-2 text-xs">
-                                <div className="text-slate-300 font-medium flex items-center gap-1.5">
-                                    <span>💡 IDM & Tarayıcı Uyumlu İndirme</span>
+                            <div className="p-4 rounded-2xl bg-slate-950/80 border border-white/5 space-y-3">
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="font-bold text-white truncate max-w-xs">{downloadModal.title}</span>
+                                    <span className="font-mono font-bold text-indigo-300">{downloadModal.size_gb} GB</span>
                                 </div>
-                                <p className="text-slate-400 leading-relaxed text-[11px]">
-                                    İndirme bağlantısı size özel oluşturuldu. IDM veya JDownloader programınıza ekleyebilir, kesintisiz tam hızda indirebilirsiniz.
-                                </p>
+                                <div className="text-[11px] text-slate-400">
+                                    Geçerlilik Süresi: <strong className="text-amber-400 font-mono">1 Saat</strong>
+                                </div>
                             </div>
 
                             <div className="space-y-2">
+                                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                                    İndirme / Stream Bağlantısı (IDM için kopyalayın)
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={downloadModal.download_url}
+                                        className="w-full px-3 py-2.5 rounded-xl glass-input font-mono text-xs text-indigo-300 select-all"
+                                    />
+                                    <button
+                                        onClick={() => copyToClipboard(downloadModal.download_url)}
+                                        className="px-4 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shrink-0 shadow-md"
+                                    >
+                                        {copied ? 'Kopyalandı!' : 'Kopyala'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                                <button
+                                    onClick={() => setDownloadModal(null)}
+                                    className="px-5 py-2.5 rounded-xl glass-panel text-slate-300 text-xs font-bold hover:text-white"
+                                >
+                                    Kapat
+                                </button>
                                 <a
                                     href={downloadModal.download_url}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] transition-all"
+                                    className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple"
                                 >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    Doğrudan İndir ({downloadModal.size_gb} GB)
+                                    Doğrudan İndirmeyi Başlat
                                 </a>
-
-                                <button
-                                    onClick={() => copyToClipboard(downloadModal.download_url)}
-                                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 py-2.5 text-xs font-semibold text-slate-300 transition-all"
-                                >
-                                    {copied ? '✅ Bağlantı Kopyalandı!' : '📋 İndirme Bağlantısını Kopyala (IDM)'}
-                                </button>
                             </div>
                         </div>
                     </div>

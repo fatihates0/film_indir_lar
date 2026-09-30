@@ -8,6 +8,9 @@ export default function MediaShow({ item, related = [], quota }) {
     const [downloadModal, setDownloadModal] = useState(null);
     const [errorMessage, setErrorMessage] = useState(null);
     const [copied, setCopied] = useState(false);
+    const [showPlayer, setShowPlayer] = useState(false);
+
+    const sizeGb = item?.file_size ? (item.file_size / 1073741824).toFixed(2) : '0.00';
 
     const handleDownload = async () => {
         setDownloading(true);
@@ -19,7 +22,7 @@ export default function MediaShow({ item, related = [], quota }) {
                 setDownloadModal({
                     download_url: res.data.download_url,
                     expires_at: res.data.expires_at,
-                    size_gb: (item.file_size / 1073741824).toFixed(2),
+                    size_gb: sizeGb,
                 });
             }
         } catch (err) {
@@ -38,11 +41,11 @@ export default function MediaShow({ item, related = [], quota }) {
 
     return (
         <AuthenticatedLayout>
-            <Head title={`${item.title} - CINEMAFLIX`} />
+            <Head title={`${item.title} - CINEBOX`} />
 
-            <div className="-mt-8 space-y-8">
-                {/* Backdrop Hero Header */}
-                <div className="relative w-full min-h-[440px] md:min-h-[520px] bg-slate-950 overflow-hidden flex items-end">
+            <div className="-mt-8 space-y-12 pb-12">
+                {/* Backdrop Hero Banner */}
+                <div className="relative w-full min-h-[480px] md:min-h-[560px] bg-slate-950 overflow-hidden flex items-end">
                     {item.backdrop_url ? (
                         <img
                             src={item.backdrop_url}
@@ -50,18 +53,18 @@ export default function MediaShow({ item, related = [], quota }) {
                             className="absolute inset-0 w-full h-full object-cover object-center filter brightness-75 scale-105"
                         />
                     ) : (
-                        <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-indigo-950/40 to-slate-900"></div>
+                        <div className="absolute inset-0 bg-hero-gradient" />
                     )}
 
-                    {/* Gradient Mask Overlays */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#0a0d14] via-[#0a0d14]/70 to-transparent"></div>
-                    <div className="absolute inset-0 bg-gradient-to-r from-[#0a0d14] via-transparent to-transparent"></div>
+                    {/* Gradient Overlay Shadows */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/70 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#08090d] via-[#08090d]/60 to-transparent" />
 
-                    {/* Hero Content Container */}
-                    <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-8 pt-24 w-full">
+                    {/* Hero Content Grid */}
+                    <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-10 pt-28 w-full">
                         <div className="flex flex-col md:flex-row gap-8 items-start">
                             {/* Poster Card */}
-                            <div className="shrink-0 w-44 sm:w-56 md:w-64 aspect-[2/3] rounded-3xl bg-slate-900 border-2 border-slate-700/60 shadow-2xl overflow-hidden relative group">
+                            <div className="shrink-0 w-44 sm:w-56 md:w-64 aspect-[2/3] rounded-3xl bg-slate-900 border border-white/10 shadow-2xl overflow-hidden relative group">
                                 {item.poster_url ? (
                                     <img src={item.poster_url} alt={item.title} className="w-full h-full object-cover" />
                                 ) : (
@@ -70,235 +73,243 @@ export default function MediaShow({ item, related = [], quota }) {
                                         <span className="font-bold text-white text-sm">{item.title}</span>
                                     </div>
                                 )}
+
+                                {sizeGb && (
+                                    <div className="absolute bottom-3 left-3 right-3 px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md border border-white/10 text-center font-mono font-bold text-xs text-indigo-300">
+                                        {sizeGb} GB
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Info & Metadata */}
-                            <div className="flex-1 space-y-4 text-slate-100">
+                            {/* Details & Specs */}
+                            <div className="flex-1 space-y-5 text-slate-100 text-left">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-600 text-white shadow-md shadow-indigo-600/30">
+                                    <span className="px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider gradient-button text-white shadow-md">
                                         {item.type === 'movie' ? 'Film' : 'Dizi'}
                                     </span>
                                     {item.year && (
-                                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-800/80 text-slate-300 border border-slate-700">
+                                        <span className="px-3.5 py-1 rounded-full text-xs font-semibold glass-panel text-slate-300 border border-white/10">
                                             {item.year}
                                         </span>
                                     )}
                                     {item.vote_average > 0 && (
-                                        <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                        <span className="px-3.5 py-1 rounded-full text-xs font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
                                             ★ {item.vote_average.toFixed(1)} / 10 TMDB
                                         </span>
                                     )}
+                                    <span className="px-3.5 py-1 rounded-full text-xs font-bold gradient-badge-4k uppercase">
+                                        4K Ultra HD
+                                    </span>
+                                    <span className="px-3.5 py-1 rounded-full text-xs font-bold bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 uppercase">
+                                        TR - EN Dual Ses
+                                    </span>
                                 </div>
 
                                 <div>
-                                    <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight leading-tight">
+                                    <h1 className="font-display font-black text-3xl sm:text-5xl text-white tracking-tight leading-tight">
                                         {item.title}
                                     </h1>
                                     {item.original_title && item.original_title !== item.title && (
                                         <div className="text-sm text-slate-400 font-medium mt-1">
-                                            Orijinal İsim: <span className="text-slate-300 italic">{item.original_title}</span>
+                                            Orijinal Başlık: <span className="text-slate-300 italic">{item.original_title}</span>
                                         </div>
                                     )}
                                 </div>
 
-                                {item.tagline && (
-                                    <p className="text-sm italic text-indigo-300 font-medium">"{item.tagline}"</p>
-                                )}
-
-                                {/* Genres Pills */}
-                                {item.genres && item.genres.length > 0 && (
-                                    <div className="flex flex-wrap gap-2 pt-1">
-                                        {item.genres.map((g) => (
-                                            <span key={g} className="px-3 py-1 rounded-xl bg-slate-900/80 border border-slate-700/60 text-xs font-semibold text-slate-300">
-                                                {g}
+                                {item.genres && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {item.genres.split(',').map((g, idx) => (
+                                            <span key={idx} className="px-3 py-1 rounded-xl text-xs font-medium bg-slate-900/80 border border-white/10 text-slate-300">
+                                                {g.trim()}
                                             </span>
                                         ))}
                                     </div>
                                 )}
 
-                                {/* Plot Overview */}
                                 {item.overview && (
-                                    <p className="text-sm text-slate-300 leading-relaxed max-w-3xl pt-2">
+                                    <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-3xl glass-panel p-4 rounded-2xl border border-white/5">
                                         {item.overview}
                                     </p>
                                 )}
 
-                                {/* Primary Action Bar */}
-                                <div className="pt-4 flex flex-wrap gap-4 items-center">
+                                {/* Main Action Buttons */}
+                                <div className="flex flex-wrap items-center gap-4 pt-2">
                                     <button
                                         onClick={handleDownload}
                                         disabled={downloading}
-                                        className="inline-flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 px-8 py-4 text-base font-bold text-white shadow-xl shadow-indigo-600/40 hover:scale-[1.02] transition-all disabled:opacity-50"
+                                        className="px-8 py-4 rounded-2xl gradient-button text-white font-bold text-sm shadow-glow-purple hover:scale-105 transition-all flex items-center gap-3"
                                     >
-                                        {downloading ? (
-                                            <span className="animate-spin text-sm">⌛ Hazırlanıyor...</span>
-                                        ) : (
-                                            <>
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                                </svg>
-                                                Hemen İndir ({(item.file_size / 1073741824).toFixed(2)} GB)
-                                            </>
-                                        )}
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                        </svg>
+                                        {downloading ? 'Yetkilendiriliyor...' : 'Yüksek Hızlı İndir (IDM)'}
                                     </button>
 
-                                    <Link
-                                        href={route('media.index')}
-                                        className="inline-flex items-center gap-2 rounded-2xl bg-slate-900/80 border border-slate-800 hover:bg-slate-800 px-6 py-4 text-sm font-semibold text-slate-300 transition-colors"
+                                    <button
+                                        onClick={() => setShowPlayer(!showPlayer)}
+                                        className="px-7 py-4 rounded-2xl glass-panel text-white font-bold text-sm hover:border-white/30 transition-all flex items-center gap-2"
                                     >
-                                        ← Kütüphaneye Dön
-                                    </Link>
+                                        <svg className="w-5 h-5 text-indigo-400 fill-current" viewBox="0 0 24 24">
+                                            <path d="M8 5v14l11-7z" />
+                                        </svg>
+                                        {showPlayer ? 'Oynatıcıyı Gizle' : 'Anında Önizleme Oynat'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Technical Specifications & Details Section */}
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8">
-                    {errorMessage && (
-                        <div className="rounded-2xl bg-rose-500/10 border border-rose-500/30 p-4 text-sm text-rose-300 flex items-center justify-between">
-                            <span>{errorMessage}</span>
-                            <button onClick={() => setErrorMessage(null)} className="text-rose-400 font-bold">&times;</button>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {/* Specs Card 1 */}
-                        <div className="rounded-3xl bg-[#0f1422] border border-slate-800 p-6 space-y-4">
-                            <h3 className="text-base font-bold text-white flex items-center gap-2">
-                                <span className="text-indigo-400">📹</span> Video & Çözünürlük
-                            </h3>
-                            <dl className="space-y-2 text-xs divide-y divide-slate-800/80">
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Çözünürlük</dt>
-                                    <dd className="font-mono font-bold text-white">
-                                        {item.width && item.height ? `${item.width}x${item.height}` : '1080p HD'}
-                                    </dd>
-                                </div>
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Video Kodek</dt>
-                                    <dd className="font-mono uppercase text-indigo-300 font-semibold">{item.video_codec || 'x264 / HEVC'}</dd>
-                                </div>
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Kare Hızı (FPS)</dt>
-                                    <dd className="font-mono text-slate-300">{item.fps ? `${item.fps} fps` : '23.976 fps'}</dd>
-                                </div>
-                            </dl>
-                        </div>
-
-                        {/* Specs Card 2 */}
-                        <div className="rounded-3xl bg-[#0f1422] border border-slate-800 p-6 space-y-4">
-                            <h3 className="text-base font-bold text-white flex items-center gap-2">
-                                <span className="text-indigo-400">🔊</span> Ses & Diller
-                            </h3>
-                            <dl className="space-y-2 text-xs divide-y divide-slate-800/80">
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Ses Kodeği</dt>
-                                    <dd className="font-mono uppercase text-indigo-300 font-semibold">{item.audio_codec || 'AAC / AC3'}</dd>
-                                </div>
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Ses Kanalları</dt>
-                                    <dd className="font-mono text-slate-300">{item.audio_channels ? `${item.audio_channels} Kanal` : '5.1 / 2.0 Stereo'}</dd>
-                                </div>
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Ses Dilleri</dt>
-                                    <dd className="font-semibold text-emerald-400">{item.audio_language || 'Türkçe / İngilizce Dual'}</dd>
-                                </div>
-                            </dl>
-                        </div>
-
-                        {/* Specs Card 3 */}
-                        <div className="rounded-3xl bg-[#0f1422] border border-slate-800 p-6 space-y-4">
-                            <h3 className="text-base font-bold text-white flex items-center gap-2">
-                                <span className="text-indigo-400">💾</span> Dosya & Depolama
-                            </h3>
-                            <dl className="space-y-2 text-xs divide-y divide-slate-800/80">
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Dosya Boyutu</dt>
-                                    <dd className="font-mono font-bold text-emerald-400">{(item.file_size / 1073741824).toFixed(2)} GB</dd>
-                                </div>
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Dosya Biçimi</dt>
-                                    <dd className="font-mono uppercase text-slate-300">{item.extension || 'MKV'}</dd>
-                                </div>
-                                <div className="pt-2 flex justify-between">
-                                    <dt className="text-slate-400">Kalan İndirme Kotanız</dt>
-                                    <dd className="font-bold text-indigo-400">{quota.remaining_gb} GB</dd>
-                                </div>
-                            </dl>
+                {/* Error Banner */}
+                {errorMessage && (
+                    <div className="max-w-7xl mx-auto px-4">
+                        <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/30 text-rose-200 flex items-center justify-between">
+                            <span className="text-sm font-semibold">{errorMessage}</span>
+                            <button onClick={() => setErrorMessage(null)} className="text-slate-400 hover:text-white">✕</button>
                         </div>
                     </div>
+                )}
 
-                    {/* Related Media Section */}
-                    {related.length > 0 && (
-                        <div className="space-y-4 pt-6">
-                            <h3 className="text-xl font-bold text-white">Benzer İçerikler</h3>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                                {related.map((rel) => (
-                                    <Link
-                                        key={rel.id}
-                                        href={route('media.show', rel.id)}
-                                        className="group rounded-2xl bg-[#0f1422] border border-slate-800 overflow-hidden hover:border-indigo-500/50 transition-all"
-                                    >
-                                        <div className="aspect-[2/3] w-full bg-slate-950 overflow-hidden">
-                                            {rel.poster_url ? (
-                                                <img src={rel.poster_url} alt={rel.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-xs text-slate-500 p-2 text-center">{rel.title}</div>
-                                            )}
-                                        </div>
-                                        <div className="p-2.5">
-                                            <div className="text-xs font-bold text-white line-clamp-1 group-hover:text-indigo-300">{rel.title}</div>
-                                            <div className="text-[10px] text-slate-500 mt-0.5">{rel.year}</div>
-                                        </div>
-                                    </Link>
-                                ))}
+                {/* Embedded Video Player Modal/Container */}
+                {showPlayer && downloadModal?.download_url && (
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-fade-in">
+                        <div className="rounded-3xl glass-panel border border-white/10 p-4 shadow-2xl overflow-hidden space-y-3">
+                            <div className="flex items-center justify-between px-2">
+                                <h3 className="font-display font-bold text-base text-white flex items-center gap-2">
+                                    <span>🎥 Canlı Medya Akış Oynatıcısı</span>
+                                </h3>
+                                <button onClick={() => setShowPlayer(false)} className="text-xs text-slate-400 hover:text-white">✕ Kapat</button>
+                            </div>
+                            <div className="aspect-video w-full rounded-2xl bg-black overflow-hidden shadow-inner">
+                                <video
+                                    controls
+                                    autoPlay
+                                    src={downloadModal.download_url}
+                                    className="w-full h-full"
+                                >
+                                    Tarayıcınız HTML5 video oynatımını desteklememektedir.
+                                </video>
                             </div>
                         </div>
-                    )}
+                    </div>
+                )}
+
+                {/* File Technical Details Grid */}
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid md:grid-cols-3 gap-6">
+                    <div className="glass-card rounded-3xl p-6 border border-white/5 text-left space-y-3">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Dosya Kalitesi</div>
+                        <div className="font-display font-black text-2xl text-white">4K UHD Remux</div>
+                        <p className="text-xs text-slate-400">Hetzner Storage Box üzerinde doğrudan yüksek veri hızıyla saklanmaktadır.</p>
+                    </div>
+
+                    <div className="glass-card rounded-3xl p-6 border border-white/5 text-left space-y-3">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Ses Dilleri</div>
+                        <div className="font-display font-bold text-lg text-white flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-xs">TR Türkçe Dublaj</span>
+                            <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 text-xs">EN Orijinal Ses</span>
+                        </div>
+                        <p className="text-xs text-slate-400">Çoklu ses kanalı ve Türkçe altyazı akışı entegredir.</p>
+                    </div>
+
+                    <div className="glass-card rounded-3xl p-6 border border-white/5 text-left space-y-3">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Kota Durumu</div>
+                        <div className="font-display font-black text-2xl text-emerald-400">{sizeGb} GB</div>
+                        <p className="text-xs text-slate-400">Bu içeriği indirdiğinizde 30 günlük dönemsel kotanızdan düşülecektir.</p>
+                    </div>
                 </div>
 
-                {/* Signed URL Download Modal */}
+                {/* Related Media Section */}
+                {related && related.length > 0 && (
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 text-left">
+                        <h2 className="font-display font-bold text-2xl text-white">Benzer İçerikler</h2>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+                            {related.map((rel) => (
+                                <Link
+                                    key={rel.id}
+                                    href={route('media.show', rel.id)}
+                                    className="group rounded-2xl glass-card overflow-hidden border border-white/5 hover:border-indigo-500/40 transition-all"
+                                >
+                                    <div className="aspect-[2/3] w-full overflow-hidden bg-slate-900">
+                                        <img
+                                            src={rel.poster_url || '/placeholder.jpg'}
+                                            alt={rel.title}
+                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                        />
+                                    </div>
+                                    <div className="p-3">
+                                        <h4 className="font-bold text-xs text-white group-hover:text-indigo-300 line-clamp-1">{rel.title}</h4>
+                                        <span className="text-[10px] text-slate-400">{rel.year || '2024'}</span>
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Download Authorization Modal */}
                 {downloadModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-                        <div className="w-full max-w-md rounded-3xl bg-[#121724] border border-slate-800 p-6 shadow-2xl space-y-5">
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <h3 className="text-base font-bold text-white line-clamp-1">{item.title}</h3>
-                                    <div className="text-xs text-indigo-400 font-semibold mt-0.5">Boyut: {downloadModal.size_gb} GB</div>
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+                        <div className="w-full max-w-lg glass-panel rounded-3xl border border-white/15 p-6 shadow-2xl space-y-6 text-left relative">
+                            <div className="flex items-start justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl font-bold">
+                                        ✓
+                                    </div>
+                                    <div>
+                                        <h3 className="font-display font-bold text-lg text-white">Bağlantı Oluşturuldu!</h3>
+                                        <p className="text-xs text-slate-400">IDM ile doğrudan indirmeye başlayabilirsiniz.</p>
+                                    </div>
                                 </div>
-                                <button onClick={() => setDownloadModal(null)} className="text-slate-400 hover:text-white font-bold text-xl">&times;</button>
+                                <button
+                                    onClick={() => setDownloadModal(null)}
+                                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5"
+                                >
+                                    ✕
+                                </button>
                             </div>
 
-                            <div className="rounded-2xl bg-slate-950 p-4 border border-slate-800 space-y-2 text-xs">
-                                <div className="text-slate-300 font-medium flex items-center gap-1.5">
-                                    <span>🚀 IDM & Tam Hız İndirme</span>
+                            <div className="p-4 rounded-2xl bg-slate-950/80 border border-white/5 space-y-2">
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="font-bold text-white truncate max-w-xs">{item.title}</span>
+                                    <span className="font-mono font-bold text-indigo-300">{downloadModal.size_gb} GB</span>
                                 </div>
-                                <p className="text-slate-400 leading-relaxed text-[11px]">
-                                    Bağlantı başarıyla oluşturuldu. IDM, JDownloader veya tarayıcınız ile indirebilirsiniz. HTTP Range desteği mevcuttur.
-                                </p>
                             </div>
 
                             <div className="space-y-2">
+                                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                                    İndirme Bağlantısı
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={downloadModal.download_url}
+                                        className="w-full px-3 py-2.5 rounded-xl glass-input font-mono text-xs text-indigo-300 select-all"
+                                    />
+                                    <button
+                                        onClick={() => copyToClipboard(downloadModal.download_url)}
+                                        className="px-4 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shrink-0"
+                                    >
+                                        {copied ? 'Kopyalandı!' : 'Kopyala'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                                <button
+                                    onClick={() => setDownloadModal(null)}
+                                    className="px-5 py-2.5 rounded-xl glass-panel text-slate-300 text-xs font-bold hover:text-white"
+                                >
+                                    Kapat
+                                </button>
                                 <a
                                     href={downloadModal.download_url}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] transition-all"
+                                    className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple"
                                 >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    Doğrudan İndir ({downloadModal.size_gb} GB)
+                                    Doğrudan İndir
                                 </a>
-
-                                <button
-                                    onClick={() => copyToClipboard(downloadModal.download_url)}
-                                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 py-2.5 text-xs font-semibold text-slate-300 transition-all"
-                                >
-                                    {copied ? '✅ Bağlantı Kopyalandı!' : '📋 İndirme Bağlantısını Kopyala (IDM)'}
-                                </button>
                             </div>
                         </div>
                     </div>

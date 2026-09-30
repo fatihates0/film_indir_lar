@@ -1,7 +1,4 @@
 import InputError from '@/Components/InputError';
-import InputLabel from '@/Components/InputLabel';
-import PrimaryButton from '@/Components/PrimaryButton';
-import TextInput from '@/Components/TextInput';
 import GuestLayout from '@/Layouts/GuestLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
 
@@ -15,7 +12,6 @@ export default function Register() {
 
     const submit = (e) => {
         e.preventDefault();
-
         post(route('register'), {
             onFinish: () => reset('password', 'password_confirmation'),
         });
@@ -23,96 +19,91 @@ export default function Register() {
 
     return (
         <GuestLayout>
-            <Head title="Register" />
+            <Head title="Kayıt Ol - CINEBOX" />
 
-            <form onSubmit={submit}>
-                <div>
-                    <InputLabel htmlFor="name" value="Name" />
+            <div className="space-y-2 text-left">
+                <h2 className="font-display font-extrabold text-2xl text-white">Yeni Hesap Oluştur</h2>
+                <p className="text-xs text-slate-400">Ücretsiz üye olun ve dönemsel indirme kotanızı kullanmaya başlayın.</p>
+            </div>
 
-                    <TextInput
+            <form onSubmit={submit} className="space-y-4 text-left">
+                <div className="space-y-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Ad Soyad</label>
+                    <input
                         id="name"
+                        type="text"
                         name="name"
                         value={data.name}
-                        className="mt-1 block w-full"
+                        className="w-full px-4 py-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
                         autoComplete="name"
-                        isFocused={true}
+                        placeholder="Ahmet Yılmaz"
                         onChange={(e) => setData('name', e.target.value)}
                         required
                     />
-
-                    <InputError message={errors.name} className="mt-2" />
+                    <InputError message={errors.name} className="mt-1" />
                 </div>
 
-                <div className="mt-4">
-                    <InputLabel htmlFor="email" value="Email" />
-
-                    <TextInput
+                <div className="space-y-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">E-Posta Adresi</label>
+                    <input
                         id="email"
                         type="email"
                         name="email"
                         value={data.email}
-                        className="mt-1 block w-full"
+                        className="w-full px-4 py-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
                         autoComplete="username"
+                        placeholder="eposta@ornek.com"
                         onChange={(e) => setData('email', e.target.value)}
                         required
                     />
-
-                    <InputError message={errors.email} className="mt-2" />
+                    <InputError message={errors.email} className="mt-1" />
                 </div>
 
-                <div className="mt-4">
-                    <InputLabel htmlFor="password" value="Password" />
-
-                    <TextInput
+                <div className="space-y-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Şifre</label>
+                    <input
                         id="password"
                         type="password"
                         name="password"
                         value={data.password}
-                        className="mt-1 block w-full"
+                        className="w-full px-4 py-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
                         autoComplete="new-password"
+                        placeholder="En az 8 karakter"
                         onChange={(e) => setData('password', e.target.value)}
                         required
                     />
-
-                    <InputError message={errors.password} className="mt-2" />
+                    <InputError message={errors.password} className="mt-1" />
                 </div>
 
-                <div className="mt-4">
-                    <InputLabel
-                        htmlFor="password_confirmation"
-                        value="Confirm Password"
-                    />
-
-                    <TextInput
+                <div className="space-y-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Şifre Tekrarı</label>
+                    <input
                         id="password_confirmation"
                         type="password"
                         name="password_confirmation"
                         value={data.password_confirmation}
-                        className="mt-1 block w-full"
+                        className="w-full px-4 py-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
                         autoComplete="new-password"
-                        onChange={(e) =>
-                            setData('password_confirmation', e.target.value)
-                        }
+                        placeholder="Şifrenizi tekrar girin"
+                        onChange={(e) => setData('password_confirmation', e.target.value)}
                         required
                     />
-
-                    <InputError
-                        message={errors.password_confirmation}
-                        className="mt-2"
-                    />
+                    <InputError message={errors.password_confirmation} className="mt-1" />
                 </div>
 
-                <div className="mt-4 flex items-center justify-end">
-                    <Link
-                        href={route('login')}
-                        className="rounded-md text-sm text-gray-600 underline hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:text-gray-400 dark:hover:text-gray-100 dark:focus:ring-offset-gray-800"
-                    >
-                        Already registered?
-                    </Link>
+                <button
+                    type="submit"
+                    disabled={processing}
+                    className="w-full py-3.5 rounded-xl gradient-button text-white font-bold text-xs shadow-glow-purple transition-all duration-200 mt-2"
+                >
+                    {processing ? 'Hesap Oluşturuluyor...' : 'Kayıt Ol'}
+                </button>
 
-                    <PrimaryButton className="ms-4" disabled={processing}>
-                        Register
-                    </PrimaryButton>
+                <div className="pt-4 border-t border-white/5 text-center text-xs text-slate-400">
+                    Zaten hesabınız var mı?{' '}
+                    <Link href={route('login')} className="text-indigo-400 font-bold hover:text-indigo-300">
+                        Giriş Yapın
+                    </Link>
                 </div>
             </form>
         </GuestLayout>

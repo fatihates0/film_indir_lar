@@ -1,8 +1,4 @@
-import Checkbox from '@/Components/Checkbox';
 import InputError from '@/Components/InputError';
-import InputLabel from '@/Components/InputLabel';
-import PrimaryButton from '@/Components/PrimaryButton';
-import TextInput from '@/Components/TextInput';
 import GuestLayout from '@/Layouts/GuestLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
 
@@ -15,7 +11,6 @@ export default function Login({ status, canResetPassword }) {
 
     const submit = (e) => {
         e.preventDefault();
-
         post(route('login'), {
             onFinish: () => reset('password'),
         });
@@ -23,76 +18,88 @@ export default function Login({ status, canResetPassword }) {
 
     return (
         <GuestLayout>
-            <Head title="Log in" />
+            <Head title="Giriş Yap - CINEBOX" />
+
+            <div className="space-y-2 text-left">
+                <h2 className="font-display font-extrabold text-2xl text-white">Hesabınıza Giriş Yapın</h2>
+                <p className="text-xs text-slate-400">Film & dizi kütüphanesine ve yüksek hızlı indirme altyapısına erişin.</p>
+            </div>
 
             {status && (
-                <div className="mb-4 text-sm font-medium text-green-600">
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-300 text-left">
                     {status}
                 </div>
             )}
 
-            <form onSubmit={submit}>
-                <div>
-                    <InputLabel htmlFor="email" value="Email" />
-
-                    <TextInput
+            <form onSubmit={submit} className="space-y-4 text-left">
+                <div className="space-y-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">E-Posta Adresi</label>
+                    <input
                         id="email"
                         type="email"
                         name="email"
                         value={data.email}
-                        className="mt-1 block w-full"
+                        className="w-full px-4 py-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
                         autoComplete="username"
-                        isFocused={true}
+                        placeholder="eposta@ornek.com"
                         onChange={(e) => setData('email', e.target.value)}
+                        required
                     />
-
-                    <InputError message={errors.email} className="mt-2" />
+                    <InputError message={errors.email} className="mt-1" />
                 </div>
 
-                <div className="mt-4">
-                    <InputLabel htmlFor="password" value="Password" />
-
-                    <TextInput
+                <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Şifre</label>
+                        {canResetPassword && (
+                            <Link
+                                href={route('password.request')}
+                                className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold"
+                            >
+                                Şifremi Unuttum
+                            </Link>
+                        )}
+                    </div>
+                    <input
                         id="password"
                         type="password"
                         name="password"
                         value={data.password}
-                        className="mt-1 block w-full"
+                        className="w-full px-4 py-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
                         autoComplete="current-password"
+                        placeholder="••••••••"
                         onChange={(e) => setData('password', e.target.value)}
+                        required
                     />
-
-                    <InputError message={errors.password} className="mt-2" />
+                    <InputError message={errors.password} className="mt-1" />
                 </div>
 
-                <div className="mt-4 block">
-                    <label className="flex items-center">
-                        <Checkbox
+                <div className="flex items-center justify-between pt-1">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
                             name="remember"
                             checked={data.remember}
-                            onChange={(e) =>
-                                setData('remember', e.target.checked)
-                            }
+                            onChange={(e) => setData('remember', e.target.checked)}
+                            className="rounded bg-slate-900 border-white/10 text-indigo-600 focus:ring-indigo-500"
                         />
-                        <span className="ms-2 text-sm text-gray-600 dark:text-gray-400">
-                            Remember me
-                        </span>
+                        <span className="text-xs text-slate-300 font-medium">Beni Hatırla</span>
                     </label>
                 </div>
 
-                <div className="mt-4 flex items-center justify-end">
-                    {canResetPassword && (
-                        <Link
-                            href={route('password.request')}
-                            className="rounded-md text-sm text-gray-600 underline hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:text-gray-400 dark:hover:text-gray-100 dark:focus:ring-offset-gray-800"
-                        >
-                            Forgot your password?
-                        </Link>
-                    )}
+                <button
+                    type="submit"
+                    disabled={processing}
+                    className="w-full py-3.5 rounded-xl gradient-button text-white font-bold text-xs shadow-glow-purple transition-all duration-200 mt-2"
+                >
+                    {processing ? 'Giriş Yapılıyor...' : 'Giriş Yap'}
+                </button>
 
-                    <PrimaryButton className="ms-4" disabled={processing}>
-                        Log in
-                    </PrimaryButton>
+                <div className="pt-4 border-t border-white/5 text-center text-xs text-slate-400">
+                    Hesabınız yok mu?{' '}
+                    <Link href={route('register')} className="text-indigo-400 font-bold hover:text-indigo-300">
+                        Hemen Kayıt Olun
+                    </Link>
                 </div>
             </form>
         </GuestLayout>
