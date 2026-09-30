@@ -33,7 +33,6 @@ class MediaScannerService
         // 1. Dizin taraması ile olası mount klasörlerini bul
         foreach ($searchPaths as $basePath) {
             if (file_exists($basePath) && is_dir($basePath)) {
-                // Eğer doğrudan bir mount noktası ise
                 if ($basePath !== '/mnt') {
                     $candidatePaths[] = str_replace('\\', '/', $basePath);
                 }
@@ -78,13 +77,11 @@ class MediaScannerService
                 continue;
             }
 
-            // Klasör adı (Örn: box1, filmler vb.)
             $folderName = basename($path);
             if ($folderName === 'mnt') {
                 continue;
             }
 
-            // Veritabanında aynı mount_path veya slug kayıtlı mı?
             $box = StorageBox::where('mount_path', $path)
                 ->orWhere('mount_path', str_replace('/', '\\', $path))
                 ->first();
@@ -95,7 +92,6 @@ class MediaScannerService
                 $displayName = 'Storage Box (' . ucfirst($folderName) . ')';
                 $slug = Str::slug($displayName);
 
-                // Slug çakışması engelle
                 $counter = 1;
                 while (StorageBox::where('slug', $slug)->exists()) {
                     $slug = Str::slug($displayName) . '-' . $counter++;
@@ -128,14 +124,14 @@ class MediaScannerService
     }
 
     /**
-     * Tüm aktif Storage Box alanlarını otomatik keşfeder ve medyalarını tarar.
+     * Tüm aktif Storage Box alanlarını ve içerisindeki tüm alt klasörleri otomatik keşfeder ve medyalarını veritabanına ekler.
      */
     public function scanAll(): array
     {
         // 1. Önce sunucudaki tüm bağlı Storage Box'ları keşfet & senkronize et
         $discoveredBoxes = $this->discoverAndSyncMounts();
 
-        // 2. DB'deki aktif tüm Storage Box'ları çek
+        // 2. DB'deki aktif tüm Storage Box'ları çek (Hem yerel mount hem Web paneli kayıtları)
         $allBoxes = StorageBox::where('is_active', true)->get();
 
         $totalAdded = 0;
@@ -166,13 +162,31 @@ class MediaScannerService
     }
 
     /**
-     * Scan a specific Storage Box or the default mount directory for media files and update database records.
+     * Belirli bir Storage Box alanını ve altındaki TÜM klasörleri derinlemesine tarar.
      */
     public function scan(?StorageBox $storageBox = null, string $subDirectory = ''): array
     {
         $mountPath = $storageBox ? $storageBox->mount_path : config('storagebox.mount_path', storage_path('app/storagebox'));
 
+        // Yerel Mount Klasörü Mevcut Değilse ancak WebDAV/HTTP Bilgisi Varsa Uzaktan Tara
         if (! file_exists($mountPath) || ! is_readable($mountPath)) {
+            if ($storageBox && ! empty($storageBox->host) && ! empty($storageBox->username) && ! empty($storageBox->password)) {
+                $storageBox->update(['status' => 'online']);
+                $remoteRes = $this->scanRemoteWebdav($storageBox, $subDirectory);
+
+                // Silinenleri kontrol et
+                $missingQuery = Media::where('is_available', true)->where('storage_box_id', $storageBox->id);
+                $missingCount = $missingQuery->whereNotIn('file_path', $remoteRes['scanned_paths'])->update(['is_available' => false]);
+
+                return [
+                    'status' => 'success',
+                    'added' => $remoteRes['added'],
+                    'updated' => $remoteRes['updated'],
+                    'missing' => $missingCount,
+                    'total_scanned' => count($remoteRes['scanned_paths']),
+                ];
+            }
+
             if ($storageBox) {
                 $storageBox->update(['status' => 'offline']);
             }
@@ -226,7 +240,6 @@ class MediaScannerService
                         continue;
                     }
 
-                    // Örnek (sample) küçük videoları atla
                     $fileName = $file->getFilename();
                     if (Str::contains($fileName, ['sample', 'Sample', 'trailer', 'Trailer']) && $file->getSize() < 100 * 1024 * 1024) {
                         continue;
@@ -242,7 +255,7 @@ class MediaScannerService
                     $fileSize = $file->getSize();
                     $title = pathinfo($fileName, PATHINFO_FILENAME);
 
-                    // Gelişmiş Medya Türü Tespiti (Dizi vs Film)
+                    // Medya Türü Tespiti (Film veya Dizi Bölümü)
                     $type = MediaType::MOVIE;
                     if (
                         Str::contains($relativePath, ['Diziler', 'Series', 'TV Shows', 'Sezon', 'Season'], true) ||
@@ -252,7 +265,7 @@ class MediaScannerService
                         $type = MediaType::EPISODE;
                     }
 
-                    // Yıl tespiti (Örn: "Inception (2010)" veya "Avatar.2009.1080p")
+                    // Yıl tespiti
                     $year = null;
                     if (preg_match('/[\(\.\_\s](\d{4})[\)\.\_\s]/', $fileName, $matches)) {
                         $candidateYear = (int) $matches[1];
@@ -280,22 +293,14 @@ class MediaScannerService
                     if ($fileSize <= 0 && $existing && $existing->file_size > 0) {
                         $fileSize = $existing->file_size;
                     }
-                    if ($fileSize <= 0 && $storageBox) {
-                        $remoteSize = $this->storageBoxService->fetchRemoteFileSize($relativePath, $storageBox);
-                        if ($remoteSize > 0) {
-                            $fileSize = $remoteSize;
-                        }
-                    }
 
                     if (! $existing) {
-                        // Slug oluşturma
                         $cleanTitle = preg_replace('/(1080p|720p|2160p|4k|bluray|web-dl|x264|x265|hevc|remux|aac|dts)/i', '', $title);
                         $cleanTitle = trim(preg_replace('/[\.\_\-]/', ' ', $cleanTitle));
                         $displayTitle = ! empty($cleanTitle) ? $cleanTitle : $title;
 
                         $slug = Media::generateUniqueSlug($displayTitle, $year);
 
-                        // Metadata tespiti
                         $meta = [];
                         try {
                             $meta = $this->storageBoxService->probeMetadata($relativePath, $storageBox);
@@ -324,7 +329,7 @@ class MediaScannerService
                             'is_available' => true,
                         ]);
 
-                        // TMDB metadata çekme
+                        // TMDB metadata otomatik çekme
                         try {
                             $this->tmdbService->fetchAndApply($newMedia);
                         } catch (\Exception $e) {
@@ -333,7 +338,6 @@ class MediaScannerService
 
                         $added++;
                     } else {
-                        // Güncelleme
                         $shouldUpdateSize = ($fileSize > 0 && $existing->file_size !== $fileSize);
                         if ($shouldUpdateSize || ! $existing->is_available) {
                             $existing->update([
@@ -364,6 +368,173 @@ class MediaScannerService
             'updated' => $updated,
             'missing' => $missingCount,
             'total_scanned' => count($scannedPaths),
+        ];
+    }
+
+    /**
+     * WebDAV üzerinden uzaktaki Storage Box'taki tüm dizinleri özyinelemeli (recursive) tarar.
+     */
+    protected function scanRemoteWebdav(StorageBox $storageBox, string $relativePath = ''): array
+    {
+        if (empty($storageBox->host) || empty($storageBox->username) || empty($storageBox->password)) {
+            return ['added' => 0, 'updated' => 0, 'scanned_paths' => []];
+        }
+
+        $user = $storageBox->username;
+        $pass = $storageBox->password;
+        $host = $storageBox->host;
+
+        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov', 'webm', 'flv'];
+        $scannedPaths = [];
+        $added = 0;
+        $updated = 0;
+
+        $directoriesToScan = [$relativePath];
+
+        while (! empty($directoriesToScan)) {
+            $currentDir = array_shift($directoriesToScan);
+            $pathSegments = explode('/', trim(str_replace('\\', '/', $currentDir), '/'));
+            $cleanPath = implode('/', array_map('rawurlencode', array_filter($pathSegments, fn ($s) => $s !== '')));
+
+            if (! str_starts_with($host, 'http://') && ! str_starts_with($host, 'https://')) {
+                $url = "https://{$host}/" . ($cleanPath ? $cleanPath . '/' : '');
+            } else {
+                $url = rtrim($host, '/') . '/' . ($cleanPath ? $cleanPath . '/' : '');
+            }
+            $url = rtrim($url, '/') . '/';
+
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PROPFIND');
+            curl_setopt($ch, CURLOPT_USERPWD, "{$user}:{$pass}");
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Depth: 1',
+                'Content-Type: application/xml; charset=utf-8',
+            ]);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if (($httpCode !== 207 && $httpCode !== 200) || ! $response) {
+                continue;
+            }
+
+            $xmlContent = preg_replace('/(<\/?)(\w+):([^>]*>)/', '$1$3', $response);
+            $xml = @simplexml_load_string($xmlContent);
+
+            if (! $xml || ! isset($xml->response)) {
+                continue;
+            }
+
+            foreach ($xml->response as $resp) {
+                $href = rawurldecode((string) $resp->href);
+                $hrefPath = trim(parse_url($href, PHP_URL_PATH) ?: $href, '/');
+                $name = basename($hrefPath);
+
+                if (empty($name) || $name === '.' || $name === '..' || Str::startsWith($name, ['$Recycle', '$RECYCLE', 'System Volume Information', '.Trash', '.git'])) {
+                    continue;
+                }
+
+                $currentRelativeClean = trim(str_replace('\\', '/', $currentDir), '/');
+                if (strtolower($hrefPath) === strtolower($currentRelativeClean)) {
+                    continue;
+                }
+
+                $isDir = false;
+                $sizeBytes = 0;
+
+                if (isset($resp->propstat->prop)) {
+                    $prop = $resp->propstat->prop;
+                    if (isset($prop->resourcetype->collection)) {
+                        $isDir = true;
+                    }
+                    if (isset($prop->getcontentlength)) {
+                        $sizeBytes = (int) $prop->getcontentlength;
+                    }
+                }
+
+                $itemRelativePath = $currentDir ? "{$currentDir}/{$name}" : $name;
+
+                if ($isDir) {
+                    $directoriesToScan[] = $itemRelativePath;
+                } else {
+                    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+                    if (in_array($ext, $videoExtensions)) {
+                        $scannedPaths[] = $itemRelativePath;
+                        $title = pathinfo($name, PATHINFO_FILENAME);
+
+                        $type = MediaType::MOVIE;
+                        if (
+                            Str::contains($itemRelativePath, ['Diziler', 'Series', 'TV Shows', 'Sezon', 'Season'], true) ||
+                            preg_match('/S\d+E\d+/i', $name)
+                        ) {
+                            $type = MediaType::EPISODE;
+                        }
+
+                        $year = null;
+                        if (preg_match('/[\(\.\_\s](\d{4})[\)\.\_\s]/', $name, $matches)) {
+                            $candidateYear = (int) $matches[1];
+                            if ($candidateYear >= 1900 && $candidateYear <= 2099) {
+                                $year = $candidateYear;
+                            }
+                        }
+
+                        $existing = Media::where('storage_box_id', $storageBox->id)
+                            ->where('file_path', $itemRelativePath)
+                            ->first();
+
+                        if (! $existing) {
+                            $cleanTitle = preg_replace('/(1080p|720p|2160p|4k|bluray|web-dl|x264|x265|hevc|remux|aac|dts)/i', '', $title);
+                            $cleanTitle = trim(preg_replace('/[\.\_\-]/', ' ', $cleanTitle));
+                            $displayTitle = ! empty($cleanTitle) ? $cleanTitle : $title;
+
+                            $slug = Media::generateUniqueSlug($displayTitle, $year);
+
+                            $newMedia = Media::create([
+                                'storage_box_id' => $storageBox->id,
+                                'type' => $type,
+                                'title' => $displayTitle,
+                                'year' => $year,
+                                'slug' => $slug,
+                                'file_path' => $itemRelativePath,
+                                'file_name' => $name,
+                                'file_size' => $sizeBytes,
+                                'extension' => $ext,
+                                'mime_type' => 'video/x-matroska',
+                                'is_active' => true,
+                                'is_available' => true,
+                            ]);
+
+                            try {
+                                $this->tmdbService->fetchAndApply($newMedia);
+                            } catch (\Exception $e) {
+                                // fallback
+                            }
+
+                            $added++;
+                        } else {
+                            if (! $existing->is_available || ($sizeBytes > 0 && $existing->file_size !== $sizeBytes)) {
+                                $existing->update([
+                                    'file_size' => $sizeBytes > 0 ? $sizeBytes : $existing->file_size,
+                                    'is_available' => true,
+                                ]);
+                                $updated++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return [
+            'added' => $added,
+            'updated' => $updated,
+            'scanned_paths' => $scannedPaths,
         ];
     }
 }

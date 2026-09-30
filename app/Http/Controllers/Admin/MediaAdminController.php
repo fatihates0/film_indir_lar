@@ -255,7 +255,7 @@ class MediaAdminController extends Controller
 
     public function triggerScan(): RedirectResponse
     {
-        $result = $this->scannerService->scan();
+        $result = $this->scannerService->scanAll();
 
         $this->auditLogService->log(
             action: 'media_scan_triggered',
@@ -264,7 +264,7 @@ class MediaAdminController extends Controller
         );
 
         return back()->with('message', sprintf(
-            'Tarama tamamlandı: %d yeni eklendi, %d güncellendi, %d erişilemez olarak işaretlendi.',
+            'Tüm Storage Box alanları ve klasörleri tarandı: %d yeni eklendi, %d güncellendi, %d erişilemez olarak işaretlendi.',
             $result['added'],
             $result['updated'],
             $result['missing']
