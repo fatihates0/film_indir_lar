@@ -85,7 +85,7 @@ class FtpStorageDriver extends AbstractStorageDriver
         }
 
         $context = stream_context_create([
-            'http' => ['follow_location' => 1, 'user_agent' => 'Mozilla/5.0'],
+            'http' => ['follow_location' => 1, 'user_agent' => 'Mozilla/5.0', 'timeout' => 30],
             'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
         ]);
 
@@ -94,6 +94,7 @@ class FtpStorageDriver extends AbstractStorageDriver
             @ftp_close($ftp);
             throw new Exception("Kaynak URL okunamadı: {$sourceUrl}");
         }
+        stream_set_timeout($sourceStream, 30);
 
         // Temp file strategy for reliable FTP upload streaming
         $tempFile = tempnam(sys_get_temp_dir(), 'ftp_up_');
@@ -119,7 +120,7 @@ class FtpStorageDriver extends AbstractStorageDriver
 
                 $now = microtime(true);
                 $timeDiff = $now - $lastUpdateTime;
-                if ($timeDiff >= 1.5) {
+                if ($timeDiff >= 1.0) {
                     $bytesDiff = $transferredNow - $lastBytes;
                     $speedBps = $timeDiff > 0 ? (int) round($bytesDiff / $timeDiff) : 0;
 
@@ -135,11 +136,24 @@ class FtpStorageDriver extends AbstractStorageDriver
         fclose($sourceStream);
         fclose($tempHandle);
 
+        if ($progressCallback && $transferredNow > $lastBytes) {
+            $progressCallback($transferredNow, 0, 0);
+        }
+
         $uploadSuccess = @ftp_put($ftp, $remoteFullPath, $tempFile, FTP_BINARY);
         @unlink($tempFile);
         @ftp_close($ftp);
 
         if (! $uploadSuccess) {
+            if ($transferredNow > 0) {
+                $remoteSize = $this->getFileSize($targetRelativePath);
+                if ($remoteSize > 0 && abs($remoteSize - $transferredNow) <= 1024) {
+                    Log::info("FTP uploadStream: ftp_put() failed, but remote file size ({$remoteSize}) matches transferred bytes ({$transferredNow}). Marking success.");
+
+                    return $remoteSize;
+                }
+            }
+
             throw new Exception("FTP Yükleme Hatası: {$remoteFullPath} dosyası sunucuya yazılamadı.");
         }
 
@@ -214,6 +228,7 @@ class FtpStorageDriver extends AbstractStorageDriver
         if (! $ftp || ! @ftp_login($ftp, $username, $password)) {
             throw new Exception("FTP Giriş Hatası ({$host}:{$port})");
         }
+        @ftp_set_option($ftp, FTP_TIMEOUT_SEC, 30);
         @ftp_pasv($ftp, true);
 
         return $ftp;

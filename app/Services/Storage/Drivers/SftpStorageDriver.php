@@ -84,6 +84,7 @@ class SftpStorageDriver extends AbstractStorageDriver
         $port = (int) ($this->config['port'] ?? 22);
 
         $sftp = new SFTP($host, $port, 30);
+        $sftp->setTimeout(30);
         if (! $sftp->login($username, $password)) {
             throw new Exception("SFTP Giriş Hatası: Sunucu {$host}:{$port} kullanıcı {$username} doğrulanamadı.");
         }
@@ -113,6 +114,7 @@ class SftpStorageDriver extends AbstractStorageDriver
             'http' => [
                 'follow_location' => 1,
                 'user_agent' => 'Mozilla/5.0',
+                'timeout' => 30,
             ],
             'ssl' => [
                 'verify_peer' => false,
@@ -124,47 +126,88 @@ class SftpStorageDriver extends AbstractStorageDriver
         if (! $sourceStream) {
             throw new Exception("Kaynak URL okunamadı: {$sourceUrl}");
         }
+        stream_set_timeout($sourceStream, 30);
 
         $transferredNow = 0;
         $lastUpdateTime = microtime(true);
         $lastBytes = 0;
 
-        // Custom upload callback with phpseclib SFTP put stream or chunk upload
-        $success = $sftp->put($remoteFullPath, function ($length) use (&$sourceStream, &$transferredNow, &$lastUpdateTime, &$lastBytes, $progressCallback, $cancellationCheck) {
-            if ($cancellationCheck && $cancellationCheck()) {
-                return false; // cancel put
-            }
+        $putFailed = false;
+        $exceptionMessage = null;
 
-            if (feof($sourceStream)) {
-                return '';
-            }
-
-            $chunk = fread($sourceStream, $length > 0 ? $length : 32768);
-            $chunkLen = strlen($chunk);
-            $transferredNow += $chunkLen;
-
-            $now = microtime(true);
-            $timeDiff = $now - $lastUpdateTime;
-
-            if ($timeDiff >= 1.5) {
-                $bytesDiff = $transferredNow - $lastBytes;
-                $speedBps = $timeDiff > 0 ? (int) round($bytesDiff / $timeDiff) : 0;
-
-                if ($progressCallback) {
-                    $progressCallback($transferredNow, 0, $speedBps);
+        try {
+            $success = $sftp->put($remoteFullPath, function ($length) use (&$sourceStream, &$transferredNow, &$lastUpdateTime, &$lastBytes, $progressCallback, $cancellationCheck) {
+                if ($cancellationCheck && $cancellationCheck()) {
+                    return false; // cancel put
                 }
 
-                $lastUpdateTime = $now;
-                $lastBytes = $transferredNow;
+                if (feof($sourceStream)) {
+                    if ($progressCallback && $transferredNow > $lastBytes) {
+                        $progressCallback($transferredNow, 0, 0);
+                        $lastBytes = $transferredNow;
+                    }
+
+                    return '';
+                }
+
+                $chunk = fread($sourceStream, $length > 0 ? $length : 32768);
+                if ($chunk === false || strlen($chunk) === 0) {
+                    if ($progressCallback && $transferredNow > $lastBytes) {
+                        $progressCallback($transferredNow, 0, 0);
+                        $lastBytes = $transferredNow;
+                    }
+
+                    return '';
+                }
+
+                $chunkLen = strlen($chunk);
+                $transferredNow += $chunkLen;
+
+                $now = microtime(true);
+                $timeDiff = $now - $lastUpdateTime;
+
+                if ($timeDiff >= 1.0) {
+                    $bytesDiff = $transferredNow - $lastBytes;
+                    $speedBps = $timeDiff > 0 ? (int) round($bytesDiff / $timeDiff) : 0;
+
+                    if ($progressCallback) {
+                        $progressCallback($transferredNow, 0, $speedBps);
+                    }
+
+                    $lastUpdateTime = $now;
+                    $lastBytes = $transferredNow;
+                }
+
+                return $chunk;
+            }, SFTP::SOURCE_CALLBACK);
+
+            if (! $success) {
+                $putFailed = true;
+            }
+        } catch (Exception $e) {
+            $putFailed = true;
+            $exceptionMessage = $e->getMessage();
+        }
+
+        if (is_resource($sourceStream)) {
+            fclose($sourceStream);
+        }
+
+        if ($progressCallback && $transferredNow > $lastBytes) {
+            $progressCallback($transferredNow, 0, 0);
+        }
+
+        if ($putFailed) {
+            if ($transferredNow > 0) {
+                $remoteSize = $this->getFileSize($targetRelativePath);
+                if ($remoteSize > 0 && abs($remoteSize - $transferredNow) <= 1024) {
+                    Log::info("SFTP uploadStream: put() reported error/timeout ({$exceptionMessage}), but remote file size ({$remoteSize}) matches transferred bytes ({$transferredNow}). Marking success.");
+
+                    return $remoteSize;
+                }
             }
 
-            return $chunk;
-        }, SFTP::SOURCE_CALLBACK);
-
-        fclose($sourceStream);
-
-        if (! $success) {
-            throw new Exception("SFTP Dosya yükleme başarısız oldu: {$remoteFullPath}");
+            throw new Exception("SFTP Dosya yükleme başarısız oldu: {$remoteFullPath}".($exceptionMessage ? " ({$exceptionMessage})" : ''));
         }
 
         return $transferredNow;

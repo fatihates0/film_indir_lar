@@ -351,3 +351,25 @@ test('duplicate file on ANY storage box is recognized across all boxes and marke
         ->and($match['box']->id)->toBe($box2->id)
         ->and($match['size'])->toBe(12345678);
 });
+
+test('cleanupStuckTransfers auto-completes transfers whose full size matches remote file or transferred bytes', function () {
+    $transfer = RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/stuck.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'stuck.mkv',
+        'relative_path' => 'Filmler/stuck.mkv',
+        'total_bytes' => 1000000,
+        'transferred_bytes' => 1000000,
+        'progress_percent' => 99.99,
+        'status' => 'transferring',
+        'auto_add_media' => false,
+    ]);
+
+    $service = app(RemoteTransferService::class);
+    $cleaned = $service->cleanupStuckTransfers();
+
+    expect($cleaned)->toBe(1)
+        ->and($transfer->fresh()->status)->toBe('completed')
+        ->and($transfer->fresh()->progress_percent)->toBe(100.0);
+});

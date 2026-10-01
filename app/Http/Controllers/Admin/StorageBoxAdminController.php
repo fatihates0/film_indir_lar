@@ -1004,12 +1004,9 @@ class StorageBoxAdminController extends Controller
      */
     public function getTransfers(Request $request): JsonResponse
     {
-        // Advance queue if there are pending transfers
-        if (RemoteTransfer::where('status', 'pending')->exists()) {
-            $this->remoteTransferService->processQueue();
-        }
-
         $perPage = max(1, min(500, (int) $request->input('per_page', 10)));
+
+        $this->remoteTransferService->processQueue();
 
         $paginated = RemoteTransfer::with('storageBox')
             ->latest()

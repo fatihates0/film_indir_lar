@@ -107,8 +107,85 @@ class RemoteTransferService
         return $box;
     }
 
+    public function cleanupStuckTransfers(): int
+    {
+        $stuckTransfers = RemoteTransfer::whereIn('status', ['transferring', 'in_progress'])->get();
+        $cleaned = 0;
+
+        foreach ($stuckTransfers as $transfer) {
+            $box = $transfer->storageBox;
+            if (! $box) {
+                continue;
+            }
+
+            $relativePath = $transfer->relative_path;
+            if (empty($relativePath)) {
+                $relativePath = ($transfer->target_folder ? trim($transfer->target_folder, '/\\').'/' : '').$transfer->file_name;
+            }
+
+            $remoteSize = 0;
+            try {
+                $remoteSize = $this->storageBoxService->fetchRemoteFileSize($relativePath, $box);
+            } catch (Exception $e) {
+                // Ignore health check exceptions
+            }
+
+            $totalBytes = (int) $transfer->total_bytes;
+            $transferredBytes = (int) $transfer->transferred_bytes;
+
+            $isComplete = false;
+            if ($totalBytes > 0 && $remoteSize > 0 && abs($remoteSize - $totalBytes) <= 2048) {
+                $isComplete = true;
+            } elseif ($transferredBytes > 0 && $remoteSize > 0 && abs($remoteSize - $transferredBytes) <= 2048) {
+                $isComplete = true;
+            } elseif ($totalBytes > 0 && $transferredBytes >= $totalBytes) {
+                $isComplete = true;
+            }
+
+            if ($isComplete) {
+                $finalSize = $remoteSize > 0 ? $remoteSize : ($transferredBytes > 0 ? $transferredBytes : $totalBytes);
+                Log::info("cleanupStuckTransfers: Transfer #{$transfer->id} ({$transfer->file_name}) sunucuda tamamlanmış tespit edildi. 'completed' olarak güncelleniyor.");
+
+                $transfer->update([
+                    'status' => 'completed',
+                    'progress_percent' => 100.00,
+                    'transferred_bytes' => $finalSize,
+                    'total_bytes' => $totalBytes > 0 ? $totalBytes : $finalSize,
+                    'speed_bps' => 0,
+                    'error_message' => null,
+                ]);
+
+                if ($transfer->auto_add_media) {
+                    try {
+                        $this->registerMedia($transfer, $box);
+                    } catch (Exception $e) {
+                        Log::warning('cleanupStuckTransfers registerMedia warning: '.$e->getMessage());
+                    }
+                }
+
+                $cleaned++;
+
+                continue;
+            }
+
+            if ($transfer->updated_at && $transfer->updated_at->diffInMinutes(now()) >= 15) {
+                Log::warning("cleanupStuckTransfers: Transfer #{$transfer->id} ({$transfer->file_name}) 15 dakikadır yanıt vermiyor. 'failed' olarak güncelleniyor.");
+                $transfer->update([
+                    'status' => 'failed',
+                    'error_message' => 'Aktarım yanıt vermediği için zaman aşımına uğradı.',
+                    'speed_bps' => 0,
+                ]);
+                $cleaned++;
+            }
+        }
+
+        return $cleaned;
+    }
+
     public function processQueue(): int
     {
+        $this->cleanupStuckTransfers();
+
         $activeCount = $this->getActiveTransfersCount();
         $maxConcurrency = $this->getMaxConcurrency();
 
