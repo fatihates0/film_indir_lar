@@ -63,7 +63,19 @@ class MediaAdminController extends Controller
                 return $score;
             })->first();
 
-            $qualities = $items->pluck('quality_label')->unique()->values()->toArray();
+            $qualityOrder = [
+                'm720p HD' => 1,
+                '720p HD' => 2,
+                'm1080p HD' => 3,
+                '1080p Full HD' => 4,
+                '1080p REMUX' => 5,
+                '4K Ultra HD' => 6,
+            ];
+
+            $qualities = $items->pluck('quality_label')->unique()->sortBy(function ($q) use ($qualityOrder) {
+                return $qualityOrder[$q] ?? 99;
+            })->values()->toArray();
+
             $seasons = $items->pluck('season_number')->filter()->unique()->sort()->values()->toArray();
             $episodesCount = $items->pluck('episode_number')->filter()->unique()->count();
 
@@ -72,20 +84,54 @@ class MediaAdminController extends Controller
                 || count($seasons) > 0
                 || $episodesCount > 0;
 
-            // Sort version items (highest quality / largest size at top)
-            $sortedVersions = $items->sortByDesc(function ($ver) {
-                $score = 1;
-                $cleanName = strtolower($ver->file_name ?? '');
-                if (preg_match('/2160p|4k|uhd/i', $ver->quality_label) || str_contains($cleanName, '2160p') || str_contains($cleanName, '4k')) {
-                    $score = 4;
-                } elseif (str_contains($cleanName, 'remux')) {
-                    $score = 3;
-                } elseif (preg_match('/1080p/i', $ver->quality_label) || str_contains($cleanName, '1080p')) {
+            // Sort version items (Season/Episode order for series, Quality/Size order for movies - ascending)
+            if ($isSeries) {
+                $sortedVersions = $items->sortBy(function ($ver) {
+                    $s = $ver->season_number ?? 1;
+                    $e = $ver->episode_number ?? 0;
                     $score = 2;
-                }
+                    $cleanName = strtolower($ver->file_name ?? '');
+                    $qLabel = $ver->quality_label;
 
-                return $score * 100000000000 + ($ver->file_size ?? 0);
-            })->values();
+                    if (preg_match('/2160p|4k|uhd/i', $qLabel) || str_contains($cleanName, '2160p') || str_contains($cleanName, '4k')) {
+                        $score = 6;
+                    } elseif (str_contains($cleanName, 'remux') || str_contains(strtolower($qLabel), 'remux')) {
+                        $score = 5;
+                    } elseif (str_contains($cleanName, 'm1080p') || $qLabel === 'm1080p HD') {
+                        $score = 3;
+                    } elseif (preg_match('/1080p/i', $qLabel) || str_contains($cleanName, '1080p')) {
+                        $score = 4;
+                    } elseif (str_contains($cleanName, 'm720p') || $qLabel === 'm720p HD') {
+                        $score = 1;
+                    } elseif (preg_match('/720p/i', $qLabel) || str_contains($cleanName, '720p')) {
+                        $score = 2;
+                    }
+
+                    return $s * 10000000 + $e * 100 + $score;
+                })->values();
+            } else {
+                $sortedVersions = $items->sortBy(function ($ver) {
+                    $score = 2;
+                    $cleanName = strtolower($ver->file_name ?? '');
+                    $qLabel = $ver->quality_label;
+
+                    if (preg_match('/2160p|4k|uhd/i', $qLabel) || str_contains($cleanName, '2160p') || str_contains($cleanName, '4k')) {
+                        $score = 6;
+                    } elseif (str_contains($cleanName, 'remux') || str_contains(strtolower($qLabel), 'remux')) {
+                        $score = 5;
+                    } elseif (str_contains($cleanName, 'm1080p') || $qLabel === 'm1080p HD') {
+                        $score = 3;
+                    } elseif (preg_match('/1080p/i', $qLabel) || str_contains($cleanName, '1080p')) {
+                        $score = 4;
+                    } elseif (str_contains($cleanName, 'm720p') || $qLabel === 'm720p HD') {
+                        $score = 1;
+                    } elseif (preg_match('/720p/i', $qLabel) || str_contains($cleanName, '720p')) {
+                        $score = 2;
+                    }
+
+                    return $score * 100000000000 + ($ver->file_size ?? 0);
+                })->values();
+            }
 
             $rep->versions = $sortedVersions->map(function ($ver) {
                 return [
@@ -95,6 +141,8 @@ class MediaAdminController extends Controller
                     'file_path' => $ver->file_path,
                     'file_size' => $ver->file_size,
                     'quality_label' => $ver->quality_label,
+                    'season_number' => $ver->season_number,
+                    'episode_number' => $ver->episode_number,
                     'storage_box' => $ver->storageBox ? [
                         'id' => $ver->storageBox->id,
                         'name' => $ver->storageBox->name,
@@ -359,6 +407,42 @@ class MediaAdminController extends Controller
         $media->delete();
 
         return back()->with('message', 'Medya kütüphaneden silindi.');
+    }
+
+    public function destroySeason(Request $request, Media $media): RedirectResponse
+    {
+        $request->validate([
+            'season_number' => ['required', 'integer'],
+        ]);
+
+        $seasonNumber = (int) $request->input('season_number');
+
+        if ($media->tmdb_id) {
+            $groupItems = Media::where('tmdb_id', $media->tmdb_id)->get();
+        } else {
+            $targetSlug = Str::slug($media->title);
+            $groupItems = Media::all()->filter(function ($item) use ($targetSlug) {
+                return Str::slug($item->title) === $targetSlug;
+            });
+        }
+
+        $seasonItems = $groupItems->filter(function ($item) use ($seasonNumber) {
+            return ($item->season_number ?? 1) === $seasonNumber;
+        });
+
+        $count = 0;
+        foreach ($seasonItems as $item) {
+            $this->auditLogService->log(
+                action: 'media_season_deleted',
+                targetType: 'Media',
+                targetId: (string) $item->id,
+                oldValues: $item->only(['id', 'title', 'file_path'])
+            );
+            $item->delete();
+            $count++;
+        }
+
+        return back()->with('message', sprintf('Sezon %d kütüphaneden silindi (%d bölüm).', $seasonNumber, $count));
     }
 
     public function triggerScan(): RedirectResponse

@@ -66,6 +66,7 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
     Route::post('/media/{media}/tmdb-sync', [MediaAdminController::class, 'syncTmdb'])->name('media.tmdb-sync');
     Route::post('/media/tmdb-sync-all', [MediaAdminController::class, 'syncAllTmdb'])->name('media.tmdb-sync-all');
     Route::patch('/media/{media}/toggle', [MediaAdminController::class, 'toggleActive'])->name('media.toggle');
+    Route::delete('/media/{media}/season', [MediaAdminController::class, 'destroySeason'])->name('media.destroy-season');
     Route::delete('/media/{media}', [MediaAdminController::class, 'destroy'])->name('media.destroy');
 
     // Storage Boxes Management

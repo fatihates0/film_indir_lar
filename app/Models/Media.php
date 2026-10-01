@@ -141,10 +141,16 @@ class Media extends Model
         if (preg_match('/remux/i', $cleanName)) {
             return '1080p REMUX';
         }
+        if (preg_match('/m1080p/i', $cleanName)) {
+            return 'm1080p HD';
+        }
         if (preg_match('/1080p/i', $cleanName)) {
             return '1080p Full HD';
         }
-        if (preg_match('/720p|m720p/i', $cleanName)) {
+        if (preg_match('/m720p/i', $cleanName)) {
+            return 'm720p HD';
+        }
+        if (preg_match('/720p/i', $cleanName)) {
             return '720p HD';
         }
 

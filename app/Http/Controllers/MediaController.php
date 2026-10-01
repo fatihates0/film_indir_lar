@@ -208,15 +208,21 @@ class MediaController extends Controller
         } else {
             // Group by quality versions for movies (Sorted lowest quality at top -> highest quality at bottom)
             $versionsData = $allGroupItems->map(function ($ver) {
-                $score = 1;
+                $score = 2;
                 $cleanName = strtolower($ver->file_name ?? '');
-                if (preg_match('/720p|m720p/i', $ver->quality_label) || str_contains($cleanName, '720p')) {
-                    $score = 1;
-                } elseif (str_contains($cleanName, 'remux')) {
+                $qLabel = $ver->quality_label;
+
+                if (preg_match('/2160p|4k|uhd/i', $qLabel) || str_contains($cleanName, '2160p') || str_contains($cleanName, '4k')) {
+                    $score = 6;
+                } elseif (str_contains($cleanName, 'remux') || str_contains(strtolower($qLabel), 'remux')) {
+                    $score = 5;
+                } elseif (str_contains($cleanName, 'm1080p') || $qLabel === 'm1080p HD') {
                     $score = 3;
-                } elseif (preg_match('/2160p|4k|uhd/i', $ver->quality_label) || str_contains($cleanName, '2160p') || str_contains($cleanName, '4k')) {
+                } elseif (preg_match('/1080p/i', $qLabel) || str_contains($cleanName, '1080p')) {
                     $score = 4;
-                } elseif (preg_match('/1080p/i', $ver->quality_label) || str_contains($cleanName, '1080p')) {
+                } elseif (str_contains($cleanName, 'm720p') || $qLabel === 'm720p HD') {
+                    $score = 1;
+                } elseif (preg_match('/720p/i', $qLabel) || str_contains($cleanName, '720p')) {
                     $score = 2;
                 }
 

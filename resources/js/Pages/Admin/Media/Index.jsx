@@ -206,6 +206,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
         }
     };
 
+    const deleteSeason = (mediaId, seasonNum, count) => {
+        if (confirm(`Sezon ${seasonNum} altındaki toplam ${count} içeriği kütüphaneden silmek istediğinize emin misiniz?`)) {
+            router.delete(route('admin.media.destroy-season', mediaId), {
+                data: { season_number: seasonNum },
+            });
+        }
+    };
+
     const triggerScan = () => {
         setScanning(true);
         router.post(route('admin.media.scan'), {}, {
@@ -471,64 +479,157 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                 {isExpanded && (
                                                     <tr className="bg-slate-950/90">
                                                         <td colSpan="7" className="p-0">
-                                                            <div className="bg-slate-950/80 border-b border-slate-800 divide-y divide-slate-800/40">
-                                                                {versions.map((ver) => (
-                                                                    <div
-                                                                        key={ver.id}
-                                                                        className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-900/60 transition-colors text-xs"
-                                                                    >
-                                                                        {/* File Name & Quality Badge */}
-                                                                        <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
-                                                                            <span className="text-slate-600 text-xs font-mono select-none">└</span>
-                                                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
-                                                                                {ver.quality_label}
-                                                                            </span>
-                                                                            <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_name}>
-                                                                                {ver.file_name}
-                                                                            </span>
-                                                                        </div>
+                                                            <div className="bg-slate-950/80 border-b border-slate-800">
+                                                                {(() => {
+                                                                    const isSeriesGroup = m.type === 'series' || m.type === 'episode' || m.group_info?.is_series;
+                                                                    if (isSeriesGroup) {
+                                                                        const seasonsGrouped = {};
+                                                                        versions.forEach((ver) => {
+                                                                            const sNum = ver.season_number || 1;
+                                                                            if (!seasonsGrouped[sNum]) {
+                                                                                seasonsGrouped[sNum] = [];
+                                                                            }
+                                                                            seasonsGrouped[sNum].push(ver);
+                                                                        });
 
-                                                                        {/* Metadata & Actions Right Aligned */}
-                                                                        <div className="flex items-center gap-6 shrink-0 text-slate-400">
-                                                                            <span className="text-slate-400 text-xs">{ver.storage_box?.name || 'Storage Box'}</span>
+                                                                        const seasonNumbers = Object.keys(seasonsGrouped).sort((a, b) => Number(a) - Number(b));
 
-                                                                            <span className="font-mono font-semibold text-emerald-400 text-xs w-20 text-right">
-                                                                                {(ver.file_size / 1073741824).toFixed(2)} GB
-                                                                            </span>
+                                                                        return seasonNumbers.map((seasonNum) => (
+                                                                            <div key={seasonNum} className="border-b border-slate-800/80 last:border-b-0">
+                                                                                {/* Season Header */}
+                                                                                <div className="px-6 py-2 bg-slate-900/90 text-xs font-bold text-indigo-300 flex items-center justify-between border-y border-slate-800/60">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                                                                                        <span>Sezon {seasonNum}</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-4">
+                                                                                        <span className="text-[11px] font-normal text-slate-400">
+                                                                                            {seasonsGrouped[seasonNum].length} Bölüm
+                                                                                        </span>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => deleteSeason(m.id, Number(seasonNum), seasonsGrouped[seasonNum].length)}
+                                                                                            className="text-[11px] font-semibold text-rose-400 hover:text-rose-300 transition-colors"
+                                                                                        >
+                                                                                            Sezonu Sil
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
 
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => toggleActive(ver.id)}
-                                                                                className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
-                                                                                    ver.is_active
-                                                                                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                                                                        : 'bg-slate-800 text-slate-500 border border-slate-700'
-                                                                                }`}
-                                                                            >
-                                                                                {ver.is_active ? 'Aktif' : 'Pasif'}
-                                                                            </button>
+                                                                                {/* Episodes List */}
+                                                                                <div className="divide-y divide-slate-800/30">
+                                                                                    {seasonsGrouped[seasonNum].map((ver) => (
+                                                                                        <div
+                                                                                            key={ver.id}
+                                                                                            className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-900/60 transition-colors text-xs"
+                                                                                        >
+                                                                                            <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
+                                                                                                <span className="text-slate-600 text-xs font-mono select-none">└</span>
+                                                                                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
+                                                                                                    {ver.quality_label}
+                                                                                                </span>
+                                                                                                <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_name}>
+                                                                                                    {ver.file_name}
+                                                                                                </span>
+                                                                                            </div>
 
-                                                                            <div className="flex items-center gap-3 w-24 justify-end">
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => syncTmdbSingle(ver.id)}
-                                                                                    disabled={syncingId === ver.id}
-                                                                                    className="text-xs text-slate-300 hover:text-white font-medium"
-                                                                                >
-                                                                                    {syncingId === ver.id ? '...' : 'TMDB'}
-                                                                                </button>
-
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => deleteMedia(ver.id, ver.file_name)}
-                                                                                    className="text-xs text-slate-400 hover:text-rose-400 font-medium transition-colors"
-                                                                                >
-                                                                                    Sil
-                                                                                </button>
+                                                                                            <div className="flex items-center gap-6 shrink-0 text-slate-400">
+                                                                                                <span className="text-slate-400 text-xs">{ver.storage_box?.name || 'Storage Box'}</span>
+                                                                                                <span className="font-mono font-semibold text-emerald-400 text-xs w-20 text-right">
+                                                                                                    {(ver.file_size / 1073741824).toFixed(2)} GB
+                                                                                                </span>
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    onClick={() => toggleActive(ver.id)}
+                                                                                                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+                                                                                                        ver.is_active
+                                                                                                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                                                                            : 'bg-slate-800 text-slate-500 border border-slate-700'
+                                                                                                    }`}
+                                                                                                >
+                                                                                                    {ver.is_active ? 'Aktif' : 'Pasif'}
+                                                                                                </button>
+                                                                                                <div className="flex items-center gap-3 w-24 justify-end">
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={() => syncTmdbSingle(ver.id)}
+                                                                                                        disabled={syncingId === ver.id}
+                                                                                                        className="text-xs text-slate-300 hover:text-white font-medium"
+                                                                                                    >
+                                                                                                        {syncingId === ver.id ? '...' : 'TMDB'}
+                                                                                                    </button>
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={() => deleteMedia(ver.id, ver.file_name)}
+                                                                                                        className="text-xs text-slate-400 hover:text-rose-400 font-medium transition-colors"
+                                                                                                    >
+                                                                                                        Sil
+                                                                                                    </button>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
                                                                             </div>
+                                                                        ));
+                                                                    }
+
+                                                                    return (
+                                                                        <div className="divide-y divide-slate-800/40">
+                                                                            {versions.map((ver) => (
+                                                                                <div
+                                                                                    key={ver.id}
+                                                                                    className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-900/60 transition-colors text-xs"
+                                                                                >
+                                                                                    <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
+                                                                                        <span className="text-slate-600 text-xs font-mono select-none">└</span>
+                                                                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
+                                                                                            {ver.quality_label}
+                                                                                        </span>
+                                                                                        <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_name}>
+                                                                                            {ver.file_name}
+                                                                                        </span>
+                                                                                    </div>
+
+                                                                                    <div className="flex items-center gap-6 shrink-0 text-slate-400">
+                                                                                        <span className="text-slate-400 text-xs">{ver.storage_box?.name || 'Storage Box'}</span>
+                                                                                        <span className="font-mono font-semibold text-emerald-400 text-xs w-20 text-right">
+                                                                                            {(ver.file_size / 1073741824).toFixed(2)} GB
+                                                                                        </span>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => toggleActive(ver.id)}
+                                                                                            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+                                                                                                ver.is_active
+                                                                                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                                                                    : 'bg-slate-800 text-slate-500 border border-slate-700'
+                                                                                            }`}
+                                                                                        >
+                                                                                            {ver.is_active ? 'Aktif' : 'Pasif'}
+                                                                                        </button>
+                                                                                        <div className="flex items-center gap-3 w-24 justify-end">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => syncTmdbSingle(ver.id)}
+                                                                                                disabled={syncingId === ver.id}
+                                                                                                className="text-xs text-slate-300 hover:text-white font-medium"
+                                                                                            >
+                                                                                                {syncingId === ver.id ? '...' : 'TMDB'}
+                                                                                            </button>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => deleteMedia(ver.id, ver.file_name)}
+                                                                                                className="text-xs text-slate-400 hover:text-rose-400 font-medium transition-colors"
+                                                                                            >
+                                                                                                Sil
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
                                                                         </div>
-                                                                    </div>
-                                                                ))}
+                                                                    );
+                                                                })()}
                                                             </div>
                                                         </td>
                                                     </tr>
