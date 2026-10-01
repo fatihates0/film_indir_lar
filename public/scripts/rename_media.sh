@@ -95,6 +95,44 @@ check_dependencies() {
     fi
 }
 
+# Önbellek (Cache) Kurulumu (Linux & Windows Uyumlu)
+setup_cache() {
+    local base_cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+    if [ -z "$HOME" ] && [ -n "$USERPROFILE" ]; then
+        base_cache="$USERPROFILE/.cache"
+    fi
+    CACHE_DIR="${base_cache}/tsi_rename"
+    if ! mkdir -p "$CACHE_DIR" 2>/dev/null; then
+        CACHE_DIR="/tmp/.tsi_rename_cache"
+        mkdir -p "$CACHE_DIR" 2>/dev/null || true
+    fi
+    CACHE_FILE="${CACHE_DIR}/processed_files.log"
+    touch "$CACHE_FILE" 2>/dev/null || true
+}
+
+# Önbellek Sorgulama (Dosya daha önce işlendi mi?)
+is_cached() {
+    local key="$1"
+    if [ -z "$key" ] || [ ! -f "$CACHE_FILE" ]; then
+        return 1
+    fi
+    if grep -qFx "$key" "$CACHE_FILE" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Önbelleğe Ekleme
+add_to_cache() {
+    local key="$1"
+    if [ -n "$key" ] && [ -f "$CACHE_FILE" ]; then
+        if ! is_cached "$key"; then
+            echo "$key" >> "$CACHE_FILE"
+        fi
+    fi
+}
+
 # Parametre Ayrıştırma (CLI Üzerinden Verilmişse)
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -108,6 +146,7 @@ parse_args() {
             --dir|--remote-dir) REMOTE_DIR="$2"; shift 2 ;;
             --dry-run) DRY_RUN=true; shift ;;
             --tmdb-key) TMDB_API_KEY="$2"; shift 2 ;;
+            --clear-cache) [ -f "$CACHE_FILE" ] && rm -f "$CACHE_FILE"; echo -e "${GREEN}[+] Önbellek temizlendi.${NC}"; shift ;;
             *) shift ;;
         esac
     done
@@ -285,38 +324,56 @@ extract_season_folder() {
     echo ""
 }
 
-# Dizi Klasör Hiyerarşisini Hesaplama (Dizi İsmi / Sezon XX)
+# Dizi veya Film Klasör Hiyerarşisini Hesaplama (Dizi -> /Diziler/Dizi İsmi/Sezon XX, Film -> /Filmler)
 compute_target_dir() {
-    local current_dir_path="$1"   # e.g. /Diziler
+    local current_dir_path="$1"   # e.g. /Filmler veya /Diziler
     local sanitized_title="$2"    # e.g. LEGO.Ninjago.Dragons.Rising
     local season_folder_name="$3" # e.g. Sezon 01
+    local media_type="$4"         # movie veya series
 
-    local current_dir_name=$(basename "$current_dir_path")
+    local dir_path="$current_dir_path"
 
-    # 1. Eğer dosya zaten bir Sezon klasörünün içindeyse
-    if echo "$current_dir_name" | grep -iqE '^(sezon|season|s)[ ._-]*[0-9]{1,2}$'; then
-        echo "$current_dir_path"
-        return
-    fi
-
-    local norm_curr=$(echo "$current_dir_name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
-    local norm_title=$(echo "$sanitized_title" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
-
-    # 2. Eğer dosya doğrudan Dizi klasörünün içindeyse (ama Sezon klasörü yoksa)
-    if [ -n "$norm_curr" ] && [ "$norm_curr" = "$norm_title" ]; then
-        if [ -n "$season_folder_name" ]; then
-            echo "${current_dir_path}/${season_folder_name}"
-        else
-            echo "$current_dir_path"
+    if [ "$media_type" = "series" ]; then
+        # Eğer dizi bir Film klasöründeyse (örn: /Filmler, /Film, /movies), bunu /Diziler alanına yönlendir
+        if echo "$dir_path" | grep -iqE '\b(filmler|film|movies|movie)\b'; then
+            dir_path=$(echo "$dir_path" | sed -E 's/\bFilmler\b/Diziler/g' | sed -E 's/\bfilmler\b/diziler/g' | sed -E 's/\bFilm\b/Diziler/g' | sed -E 's/\bfilm\b/diziler/g' | sed -E 's/\bMovies\b/Diziler/g' | sed -E 's/\bmovies\b/diziler/g')
         fi
-        return
-    fi
 
-    # 3. Eğer dosya ana dizindeyse (örn: /Diziler altında)
-    if [ -n "$season_folder_name" ]; then
-        echo "${current_dir_path}/${sanitized_title}/${season_folder_name}"
+        local current_dir_name=$(basename "$dir_path")
+
+        # 1. Eğer dosya zaten bir Sezon klasörünün içindeyse
+        if echo "$current_dir_name" | grep -iqE '^(sezon|season|s)[ ._-]*[0-9]{1,2}$'; then
+            echo "$dir_path"
+            return
+        fi
+
+        local norm_curr=$(echo "$current_dir_name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
+        local norm_title=$(echo "$sanitized_title" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
+
+        # 2. Eğer dosya doğrudan Dizi klasörünün içindeyse (ama Sezon klasörü yoksa)
+        if [ -n "$norm_curr" ] && [ "$norm_curr" = "$norm_title" ]; then
+            if [ -n "$season_folder_name" ]; then
+                echo "${dir_path}/${season_folder_name}"
+            else
+                echo "$dir_path"
+            fi
+            return
+        fi
+
+        # 3. Eğer dosya ana dizindeyse (örn: /Diziler altında)
+        if [ -n "$season_folder_name" ]; then
+            echo "${dir_path}/${sanitized_title}/${season_folder_name}"
+        else
+            echo "${dir_path}/${sanitized_title}"
+        fi
     else
-        echo "${current_dir_path}/${sanitized_title}"
+        # Eğer film bir Dizi klasöründeyse (örn: /Diziler, /Series), bunu /Filmler alanına yönlendir
+        if echo "$dir_path" | grep -iqE '\b(diziler|dizi|series|tv.shows|season|sezon)\b'; then
+            dir_path=$(echo "$dir_path" | sed -E 's/\bDiziler\b/Filmler/g' | sed -E 's/\bdiziler\b/filmler/g' | sed -E 's/\bDizi\b/Filmler/g' | sed -E 's/\bdizi\b/filmler/g' | sed -E 's/\bSeries\b/Filmler/g' | sed -E 's/\bseries\b/filmler/g')
+            # Eğer Sezon klasörü altındaysa üst klasöre (Film köküne) çıkar
+            dir_path=$(echo "$dir_path" | sed -E 's#/(sezon|season|s)[ ._-]*[0-9]{1,2}$##i')
+        fi
+        echo "$dir_path"
     fi
 }
 
@@ -674,6 +731,8 @@ query_tmdb() {
 compute_new_filename() {
     local file_path="$1"       # Uzak veya yerel göreli dosya yolu
     local full_probe_url="$2"  # ffprobe için URL veya yerel yol
+    local current_idx="$3"     # İşlenen dosya sırası (örn: 35)
+    local total_count="$4"     # Toplam dosya sayısı (örn: 231)
     local file_name=$(basename "$file_path")
     local ext="${file_name##*.}"
     local ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
@@ -685,7 +744,11 @@ compute_new_filename() {
     esac
 
     echo -e "${BLUE}------------------------------------------------------------${NC}" >&2
-    echo -e "${CYAN}İşleniyor:${NC} $file_name" >&2
+    if [ -n "$current_idx" ] && [ -n "$total_count" ] && [ "$total_count" -gt 0 ]; then
+        echo -e "${CYAN}[${current_idx}/${total_count}] İşleniyor:${NC} $file_name" >&2
+    else
+        echo -e "${CYAN}İşleniyor:${NC} $file_name" >&2
+    fi
 
     local media_type=$(detect_media_type "$file_path" "$file_name")
     local search_info=$(clean_search_title "$file_name")
@@ -832,21 +895,38 @@ process_webdav() {
         return
     fi
 
+    # Alfabetik Sıralama (A-Z)
+    file_paths=$(echo "$file_paths" | sort -f)
+
+    local total_count=$(echo "$file_paths" | grep -c . || echo 0)
+    local current_idx=0
+
     echo "$file_paths" | while read -r raw_href; do
         if [ -z "$raw_href" ]; then continue; fi
+        current_idx=$((current_idx + 1))
 
         local file_name=$(basename "$raw_href")
         local dir_path=$(dirname "$raw_href")
-        
+
+        # Önbellek (Cache) Kontrolü
+        local cache_key="webdav_${REMOTE_URL}_${raw_href}"
+        if is_cached "$cache_key"; then
+            echo -e "${BLUE}------------------------------------------------------------${NC}" >&2
+            echo -e "${CYAN}[${current_idx}/${total_count}] ${YELLOW}[ÖNBELLEK/CACHE]${NC} $file_name" >&2
+            echo -e "${YELLOW}--> Dosya önbellekte kayıtlı (daha önce işlendi), istek atılmadan atlanıyor.${NC}" >&2
+            echo "" >&2
+            continue
+        fi
+
         # ffprobe için tam HTTP URL oluştur
         local scheme=$(echo "$base_url" | grep -oE '^(https?://)')
         local host_part=${base_url#$scheme}
         local probe_url="${scheme}${REMOTE_USER}:${REMOTE_PASS}@${host_part}${raw_href}"
 
-        local new_name=$(compute_new_filename "$file_name" "$probe_url")
+        local new_name=$(compute_new_filename "$file_name" "$probe_url" "$current_idx" "$total_count")
         local final_name="${new_name:-$file_name}"
 
-        # Dizi hiyerarşisi hesaplama
+        # Dizi / Film hiyerarşisi ve kök klasör yönlendirme hesabı
         local media_type=$(detect_media_type "$dir_path" "$file_name")
         local target_dir_path="$dir_path"
 
@@ -860,19 +940,23 @@ process_webdav() {
             local san_title=$(sanitize_title "${tmdb_t:-$parsed_title}")
             local seas_folder=$(extract_season_folder "$file_name")
 
-            if [ -n "$san_title" ]; then
-                target_dir_path=$(compute_target_dir "$dir_path" "$san_title" "$seas_folder")
-            fi
+            target_dir_path=$(compute_target_dir "$dir_path" "$san_title" "$seas_folder" "$media_type")
+        else
+            target_dir_path=$(compute_target_dir "$dir_path" "" "" "$media_type")
         fi
 
         local old_full_url="${base_url}${raw_href}"
         local new_full_url="${base_url}${target_dir_path}/${final_name}"
         new_full_url=$(echo "$new_full_url" | sed -E 's#//+#/#g' | sed -E 's#http:/#http://#g' | sed -E 's#https:/#https://#g')
 
-        if [ "$old_full_url" = "$new_full_url" ]; then continue; fi
+        if [ "$old_full_url" = "$new_full_url" ]; then
+            add_to_cache "$cache_key"
+            continue;
+        fi
 
         if [ "$DRY_RUN" = true ]; then
             echo -e "${CYAN}[SIMULATION WebDAV MOVE & RENAME]:${NC} $file_name -> ${target_dir_path}/${final_name}"
+            add_to_cache "$cache_key"
         else
             # WebDAV üzerinde klasör hiyerarşisini oluştur (MKCOL)
             if [ "$dir_path" != "$target_dir_path" ]; then
@@ -890,6 +974,8 @@ process_webdav() {
             local http_code=$(curl -s -k -o /dev/null -w "%{http_code}" -u "${REMOTE_USER}:${REMOTE_PASS}" -X MOVE -H "Destination: ${new_full_url}" "${old_full_url}")
             if [[ "$http_code" =~ ^(201|204|200)$ ]]; then
                 echo -e "${GREEN}✓ BAŞARILI${NC}"
+                add_to_cache "$cache_key"
+                add_to_cache "webdav_${REMOTE_URL}_${target_dir_path}/${final_name}"
             else
                 echo -e "${RED}HATA (HTTP $http_code)${NC}"
             fi
@@ -981,17 +1067,34 @@ process_ftp() {
         return
     fi
 
+    # Alfabetik Sıralama (A-Z)
+    file_list=$(echo "$file_list" | sort -f)
+
+    local total_count=$(echo "$file_list" | grep -c . || echo 0)
+    local current_idx=0
+
     echo "$file_list" | while read -r rel_path; do
         if [ -z "$rel_path" ]; then continue; fi
+        current_idx=$((current_idx + 1))
 
         local file_name=$(basename "$rel_path")
         local dir_path=$(dirname "$rel_path")
 
+        # Önbellek (Cache) Kontrolü
+        local cache_key="ftp_${REMOTE_HOST}:${REMOTE_PORT}_${rel_path}"
+        if is_cached "$cache_key"; then
+            echo -e "${BLUE}------------------------------------------------------------${NC}" >&2
+            echo -e "${CYAN}[${current_idx}/${total_count}] ${YELLOW}[ÖNBELLEK/CACHE]${NC} $file_name" >&2
+            echo -e "${YELLOW}--> Dosya önbellekte kayıtlı (daha önce işlendi), atlanıyor.${NC}" >&2
+            echo "" >&2
+            continue
+        fi
+
         local probe_url="ftp://${REMOTE_USER}:${REMOTE_PASS}@${REMOTE_HOST}:${REMOTE_PORT}${rel_path}"
-        local new_name=$(compute_new_filename "$file_name" "$probe_url")
+        local new_name=$(compute_new_filename "$file_name" "$probe_url" "$current_idx" "$total_count")
         local final_name="${new_name:-$file_name}"
 
-        # Dizi hiyerarşisi hesaplama
+        # Dizi / Film hiyerarşisi ve kök klasör yönlendirme hesabı
         local media_type=$(detect_media_type "$dir_path" "$file_name")
         local target_dir_path="$dir_path"
 
@@ -1005,9 +1108,9 @@ process_ftp() {
             local san_title=$(sanitize_title "${tmdb_t:-$parsed_title}")
             local seas_folder=$(extract_season_folder "$file_name")
 
-            if [ -n "$san_title" ]; then
-                target_dir_path=$(compute_target_dir "$dir_path" "$san_title" "$seas_folder")
-            fi
+            target_dir_path=$(compute_target_dir "$dir_path" "$san_title" "$seas_folder" "$media_type")
+        else
+            target_dir_path=$(compute_target_dir "$dir_path" "" "" "$media_type")
         fi
 
         local old_path="${rel_path}"
@@ -1015,10 +1118,14 @@ process_ftp() {
         local new_path="${target_dir_path}/${final_name}"
         new_path=$(echo "$new_path" | sed -E 's#//+#/#g')
 
-        if [ "$old_path" = "$new_path" ]; then continue; fi
+        if [ "$old_path" = "$new_path" ]; then
+            add_to_cache "$cache_key"
+            continue;
+        fi
 
         if [ "$DRY_RUN" = true ]; then
             echo -e "${CYAN}[SIMULATION FTP MOVE & RENAME]:${NC} $file_name -> ${target_dir_path}/${final_name}"
+            add_to_cache "$cache_key"
         else
             # FTP üzerinde klasör hiyerarşisini oluştur (MKD)
             if [ "$dir_path" != "$target_dir_path" ]; then
@@ -1037,6 +1144,8 @@ process_ftp() {
                 -Q "RNFR ${old_path}" \
                 -Q "RNTO ${new_path}" > /dev/null
             echo -e "${GREEN}✓ BAŞARILI${NC}"
+            add_to_cache "$cache_key"
+            add_to_cache "ftp_${REMOTE_HOST}:${REMOTE_PORT}_${target_dir_path}/${final_name}"
         fi
     done
 }
@@ -1052,14 +1161,41 @@ process_local() {
 
     echo -e "${BLUE}[+] Yerel dizin işleniyor (Tüm Alt Klasörler Dahil): ${target_dir}${NC}"
 
-    find "$target_dir" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.m4v" -o -iname "*.ts" -o -iname "*.m2ts" -o -iname "*.mov" -o -iname "*.webm" -o -iname "*.flv" -o -iname "*.wmv" -o -iname "*.iso" \) | while read -r file_path; do
+    local file_list=""
+    file_list=$(find "$target_dir" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.m4v" -o -iname "*.ts" -o -iname "*.m2ts" -o -iname "*.mov" -o -iname "*.webm" -o -iname "*.flv" -o -iname "*.wmv" -o -iname "*.iso" \) || echo "")
+
+    if [ -z "$file_list" ]; then
+        echo -e "${YELLOW}Yerel dizinde işlenecek video dosyası bulunamadı.${NC}"
+        return
+    fi
+
+    # Alfabetik Sıralama (A-Z)
+    file_list=$(echo "$file_list" | sort -f)
+
+    local total_count=$(echo "$file_list" | grep -c . || echo 0)
+    local current_idx=0
+
+    echo "$file_list" | while read -r file_path; do
+        if [ -z "$file_path" ]; then continue; fi
+        current_idx=$((current_idx + 1))
+
         local file_name=$(basename "$file_path")
         local dir_name=$(dirname "$file_path")
-        
-        local new_name=$(compute_new_filename "$file_path" "$file_path")
+
+        # Önbellek (Cache) Kontrolü
+        local cache_key="local_${file_path}"
+        if is_cached "$cache_key"; then
+            echo -e "${BLUE}------------------------------------------------------------${NC}" >&2
+            echo -e "${CYAN}[${current_idx}/${total_count}] ${YELLOW}[ÖNBELLEK/CACHE]${NC} $file_name" >&2
+            echo -e "${YELLOW}--> Dosya önbellekte kayıtlı (daha önce işlendi), atlanıyor.${NC}" >&2
+            echo "" >&2
+            continue
+        fi
+
+        local new_name=$(compute_new_filename "$file_path" "$file_path" "$current_idx" "$total_count")
         local final_name="${new_name:-$file_name}"
 
-        # Dizi hiyerarşisi hesaplama
+        # Dizi / Film hiyerarşisi ve kök klasör yönlendirme hesabı
         local media_type=$(detect_media_type "$dir_name" "$file_name")
         local target_dir_path="$dir_name"
 
@@ -1073,17 +1209,21 @@ process_local() {
             local san_title=$(sanitize_title "${tmdb_t:-$parsed_title}")
             local seas_folder=$(extract_season_folder "$file_name")
 
-            if [ -n "$san_title" ]; then
-                target_dir_path=$(compute_target_dir "$dir_name" "$san_title" "$seas_folder")
-            fi
+            target_dir_path=$(compute_target_dir "$dir_name" "$san_title" "$seas_folder" "$media_type")
+        else
+            target_dir_path=$(compute_target_dir "$dir_name" "" "" "$media_type")
         fi
 
         local target_filepath="${target_dir_path}/${final_name}"
 
-        if [ "$file_path" = "$target_filepath" ]; then continue; fi
+        if [ "$file_path" = "$target_filepath" ]; then
+            add_to_cache "$cache_key"
+            continue;
+        fi
 
         if [ "$DRY_RUN" = true ]; then
             echo -e "${CYAN}[SIMULATION Yerel MOVE & RENAME]:${NC} $file_name -> ${target_dir_path}/${final_name}"
+            add_to_cache "$cache_key"
         else
             mkdir -p "$target_dir_path"
             if [ -f "$target_filepath" ] && [ "$file_path" != "$target_filepath" ]; then
@@ -1091,6 +1231,8 @@ process_local() {
             else
                 mv "$file_path" "$target_filepath"
                 echo -e "${GREEN}✓ BAŞARIYLA TAŞINDI VE YENİDEN ADLANDIRILDI${NC}"
+                add_to_cache "$cache_key"
+                add_to_cache "local_${target_filepath}"
             fi
         fi
     done
@@ -1100,6 +1242,7 @@ process_local() {
 # Ana Çalıştırma Akışı
 # ==============================================================================
 
+setup_cache
 check_dependencies
 parse_args "$@"
 
@@ -1112,6 +1255,7 @@ echo ""
 echo -e "${MAGENTA}================================================================${NC}"
 echo -e "${GREEN}İşlem Başlatılıyor...${NC}"
 echo -e "  - Protokol : ${YELLOW}${PROTOCOL}${NC}"
+echo -e "  - Önbellek : ${CYAN}${CACHE_FILE}${NC}"
 echo -e "  - Mod      : $( [ "$DRY_RUN" = true ] && echo -e "${CYAN}Simülasyon (Dry-Run)${NC}" || echo -e "${GREEN}Canlı (Dosyalar Yeniden Adlandırılacak)${NC}" )"
 echo -e "${MAGENTA}================================================================${NC}"
 echo ""
