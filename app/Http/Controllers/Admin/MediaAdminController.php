@@ -13,6 +13,7 @@ use App\Services\TmdbService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -39,15 +40,103 @@ class MediaAdminController extends Controller
             });
         }
 
-        $perPage = $request->input('per_page', 15);
-        if ($perPage === 'all') {
-            $count = (clone $query)->count();
-            $perPage = $count > 0 ? $count : 15;
+        $allMatching = $query->get();
+
+        // Group media items by TMDB ID or title slug
+        $grouped = $allMatching->groupBy(function ($item) {
+            return $item->tmdb_id ? 'tmdb_'.$item->tmdb_id : 'title_'.Str::slug($item->title);
+        })->map(function ($items) {
+            // Pick representative item (prefer poster available, highest quality)
+            $rep = $items->sortByDesc(function ($item) {
+                $score = 0;
+                if ($item->poster_path) {
+                    $score += 10;
+                }
+                if (preg_match('/2160p|4k/i', $item->quality_label)) {
+                    $score += 4;
+                } elseif (preg_match('/remux/i', $item->quality_label)) {
+                    $score += 3;
+                } elseif (preg_match('/1080p/i', $item->quality_label)) {
+                    $score += 2;
+                }
+
+                return $score;
+            })->first();
+
+            $qualities = $items->pluck('quality_label')->unique()->values()->toArray();
+            $seasons = $items->pluck('season_number')->filter()->unique()->sort()->values()->toArray();
+            $episodesCount = $items->pluck('episode_number')->filter()->unique()->count();
+
+            $isSeries = $rep->type->value === 'series'
+                || $rep->type->value === 'episode'
+                || count($seasons) > 0
+                || $episodesCount > 0;
+
+            // Sort version items (highest quality / largest size at top)
+            $sortedVersions = $items->sortByDesc(function ($ver) {
+                $score = 1;
+                $cleanName = strtolower($ver->file_name ?? '');
+                if (preg_match('/2160p|4k|uhd/i', $ver->quality_label) || str_contains($cleanName, '2160p') || str_contains($cleanName, '4k')) {
+                    $score = 4;
+                } elseif (str_contains($cleanName, 'remux')) {
+                    $score = 3;
+                } elseif (preg_match('/1080p/i', $ver->quality_label) || str_contains($cleanName, '1080p')) {
+                    $score = 2;
+                }
+
+                return $score * 100000000000 + ($ver->file_size ?? 0);
+            })->values();
+
+            $rep->versions = $sortedVersions->map(function ($ver) {
+                return [
+                    'id' => $ver->id,
+                    'title' => $ver->title,
+                    'file_name' => $ver->file_name,
+                    'file_path' => $ver->file_path,
+                    'file_size' => $ver->file_size,
+                    'quality_label' => $ver->quality_label,
+                    'storage_box' => $ver->storageBox ? [
+                        'id' => $ver->storageBox->id,
+                        'name' => $ver->storageBox->name,
+                    ] : null,
+                    'is_active' => $ver->is_active,
+                    'is_available' => $ver->is_available,
+                    'tmdb_id' => $ver->tmdb_id,
+                    'vote_average' => $ver->vote_average,
+                    'created_at' => $ver->created_at?->format('d.m.Y H:i'),
+                ];
+            })->toArray();
+
+            $rep->group_info = [
+                'versions_count' => $items->count(),
+                'qualities' => $qualities,
+                'seasons' => $seasons,
+                'episodes_count' => $episodesCount,
+                'total_size_bytes' => $items->sum('file_size'),
+                'is_series' => $isSeries,
+            ];
+
+            return $rep;
+        })->values();
+
+        // Sort grouped collection by latest ID
+        $grouped = $grouped->sortByDesc('id')->values();
+
+        $page = (int) $request->input('page', 1);
+        $perPageInput = $request->input('per_page', 15);
+        if ($perPageInput === 'all') {
+            $perPage = max(1, $grouped->count());
         } else {
-            $perPage = max(1, (int) $perPage);
+            $perPage = max(1, (int) $perPageInput);
         }
 
-        $media = $query->paginate($perPage)->withQueryString();
+        $media = new LengthAwarePaginator(
+            $grouped->forPage($page, $perPage)->values(),
+            $grouped->count(),
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()]
+        );
 
         $storageBoxes = StorageBox::where('is_active', true)
             ->get()

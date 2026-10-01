@@ -1,12 +1,20 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 export default function MediaAdminIndex({ media, storageBoxes = [], filters = {} }) {
     const flash = usePage().props.flash;
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
     const [perPage, setPerPage] = useState(filters.per_page || '15');
+    const [expandedGroups, setExpandedGroups] = useState({});
+
+    const toggleGroupExpand = (id) => {
+        setExpandedGroups((prev) => ({
+            ...prev,
+            [id]: !prev[id],
+        }));
+    };
 
     const handleSearchSubmit = (e) => {
         e.preventDefault();
@@ -217,17 +225,17 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                     <div className="flex flex-wrap items-center gap-2.5">
                         <button
                             onClick={openPicker}
-                            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/30 hover:scale-105 transition-all"
+                            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-xs font-semibold text-white shadow-md hover:scale-[1.02] transition-all"
                         >
-                            <span>➕</span> Dosya Seç & Medya Ekle
+                            Dosya Seç & Medya Ekle
                         </button>
 
                         <button
                             onClick={syncAllTmdb}
                             disabled={syncingAll}
-                            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-50"
+                            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 text-xs font-semibold text-white transition-all disabled:opacity-50"
                         >
-                            {syncingAll ? '⚡ TMDB Eşitleniyor...' : '🎬 Tüm TMDB Bilgilerini Çek'}
+                            {syncingAll ? 'TMDB Eşitleniyor...' : 'Tüm TMDB Bilgilerini Çek'}
                         </button>
 
                         <button
@@ -235,7 +243,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                             disabled={scanning}
                             className="inline-flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300 border border-slate-700 transition-all disabled:opacity-50"
                         >
-                            {scanning ? 'Taranıyor...' : '🔄 Otomatik Tarama'}
+                            {scanning ? 'Taranıyor...' : 'Otomatik Tarama'}
                         </button>
                     </div>
                 </div>
@@ -308,78 +316,226 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                 {media.data.length === 0 ? (
                                     <tr>
                                         <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
-                                            Henüz eklenmiş medya bulunmuyor. "Dosya Seç & Medya Ekle" butonundan ekleyebilirsiniz.
+                                            Kütüphanenizde henüz medya bulunmuyor. "Dosya Seç & Medya Ekle" butonundan ekleyebilirsiniz.
                                         </td>
                                     </tr>
                                 ) : (
-                                    media.data.map((m) => (
-                                        <tr key={m.id} className="hover:bg-slate-800/40 transition-colors">
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center gap-3">
-                                                    {m.poster_url ? (
-                                                        <img src={m.poster_url} alt="" className="w-10 h-14 object-cover rounded-lg border border-slate-700 shrink-0" />
-                                                    ) : (
-                                                        <div className="w-10 h-14 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 font-bold shrink-0">🎬</div>
-                                                    )}
-                                                    <div>
-                                                        <div className="font-bold text-white text-sm line-clamp-1">{m.title} {m.year && `(${m.year})`}</div>
-                                                        <div className="text-[11px] text-slate-500 font-mono truncate max-w-xs">{m.file_name}</div>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {m.tmdb_id ? (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                                                        ✓ TMDB Linked ({m.vote_average ? `★ ${m.vote_average}` : 'ID: ' + m.tmdb_id})
-                                                    </span>
-                                                ) : (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                                                        ⚠️ Eksik TMDB
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 font-semibold uppercase">
-                                                <span className={`px-2 py-0.5 rounded text-[10px] ${
-                                                    m.type === 'movie' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                                                }`}>
-                                                    {m.type === 'movie' ? 'FILM' : 'DIZI'}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-indigo-400 font-semibold">
-                                                {m.storage_box?.name || 'Varsayılan'}
-                                            </td>
-                                            <td className="px-4 py-3 font-semibold text-emerald-400">
-                                                {(m.file_size / 1073741824).toFixed(2)} GB
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <button
-                                                    onClick={() => toggleActive(m.id)}
-                                                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
-                                                        m.is_active
-                                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                                    media.data.map((m) => {
+                                        const isExpanded = !!expandedGroups[m.id];
+                                        const versions = m.versions || [];
+                                        const versionsCount = m.group_info?.versions_count || versions.length || 1;
+                                        const totalSizeGb = m.group_info?.total_size_bytes
+                                            ? (m.group_info.total_size_bytes / 1073741824).toFixed(2)
+                                            : (m.file_size / 1073741824).toFixed(2);
+                                        const qualities = m.group_info?.qualities || [];
+
+                                        return (
+                                            <Fragment key={m.id}>
+                                                <tr
+                                                    onClick={() => toggleGroupExpand(m.id)}
+                                                    className={`hover:bg-slate-800/40 transition-colors cursor-pointer border-b border-slate-800/50 ${
+                                                        isExpanded ? 'bg-slate-900/80' : ''
                                                     }`}
                                                 >
-                                                    {m.is_active ? 'AKTİF' : 'PASİF'}
-                                                </button>
-                                            </td>
-                                            <td className="px-4 py-3 text-right space-x-2">
-                                                <button
-                                                    onClick={() => syncTmdbSingle(m.id)}
-                                                    disabled={syncingId === m.id}
-                                                    className="px-2.5 py-1 text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded-lg transition-all"
-                                                >
-                                                    {syncingId === m.id ? '⌛' : 'TMDB Sync'}
-                                                </button>
-                                                <button
-                                                    onClick={() => deleteMedia(m.id, m.title)}
-                                                    className="px-2.5 py-1 text-[11px] font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-all"
-                                                >
-                                                    Sil
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))
+                                                    {/* İçerik Başlığı & Detay */}
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    toggleGroupExpand(m.id);
+                                                                }}
+                                                                className="text-slate-400 hover:text-white transition-colors p-1"
+                                                            >
+                                                                <svg
+                                                                    className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-indigo-400' : ''}`}
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    viewBox="0 0 24 24"
+                                                                >
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                                                                </svg>
+                                                            </button>
+
+                                                            {m.poster_url ? (
+                                                                <img src={m.poster_url} alt="" className="w-9 h-13 object-cover rounded-md border border-slate-800 shrink-0" />
+                                                            ) : (
+                                                                <div className="w-9 h-13 rounded-md bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 text-xs shrink-0">?</div>
+                                                            )}
+
+                                                            <div>
+                                                                <div className="font-semibold text-white text-sm">
+                                                                    {m.title} {m.year && <span className="text-slate-400 font-normal">({m.year})</span>}
+                                                                </div>
+                                                                <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
+                                                                    <span>{versionsCount} Sürüm</span>
+                                                                    {qualities.length > 0 && (
+                                                                        <>
+                                                                            <span>•</span>
+                                                                            <span className="text-slate-300">{qualities.join(', ')}</span>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+
+                                                    {/* TMDB Status */}
+                                                    <td className="px-4 py-3">
+                                                        {m.tmdb_id ? (
+                                                            <span className="text-xs font-medium text-emerald-400 flex items-center gap-1.5">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                                                {m.vote_average ? `★ ${m.vote_average.toFixed(1)}` : 'Eşleşti'}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-xs font-medium text-amber-400 flex items-center gap-1.5">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                                                                TMDB Eksik
+                                                            </span>
+                                                        )}
+                                                    </td>
+
+                                                    {/* Tür */}
+                                                    <td className="px-4 py-3 text-xs text-slate-300 font-medium">
+                                                        {m.type === 'movie' || !m.group_info?.is_series ? 'Film' : 'Dizi'}
+                                                    </td>
+
+                                                    {/* Storage Box */}
+                                                    <td className="px-4 py-3 text-xs text-slate-400">
+                                                        {m.storage_box?.name || (versions[0]?.storage_box?.name ?? 'Storage Box')}
+                                                    </td>
+
+                                                    {/* Boyut */}
+                                                    <td className="px-4 py-3 text-xs font-semibold text-emerald-400">
+                                                        {totalSizeGb} GB
+                                                    </td>
+
+                                                    {/* Durum */}
+                                                    <td className="px-4 py-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleActive(m.id);
+                                                            }}
+                                                            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+                                                                m.is_active
+                                                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                                            }`}
+                                                        >
+                                                            {m.is_active ? 'Aktif' : 'Pasif'}
+                                                        </button>
+                                                    </td>
+
+                                                    {/* İşlemler */}
+                                                    <td className="px-4 py-3 text-right">
+                                                        <div className="flex items-center justify-end gap-3">
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    toggleGroupExpand(m.id);
+                                                                }}
+                                                                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+                                                            >
+                                                                {isExpanded ? 'Gizle' : `Sürümler (${versionsCount})`}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    syncTmdbSingle(m.id);
+                                                                }}
+                                                                disabled={syncingId === m.id}
+                                                                className="text-xs text-slate-300 hover:text-white font-medium"
+                                                            >
+                                                                {syncingId === m.id ? 'Yükleniyor...' : 'TMDB'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    deleteMedia(m.id, m.title);
+                                                                }}
+                                                                className="text-xs text-slate-400 hover:text-rose-400 font-medium transition-colors"
+                                                            >
+                                                                Sil
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+
+                                                {/* NESTED VERSIONS LIST - FLUSH & SEAMLESS */}
+                                                {isExpanded && (
+                                                    <tr className="bg-slate-950/90">
+                                                        <td colSpan="7" className="p-0">
+                                                            <div className="bg-slate-950/80 border-b border-slate-800 divide-y divide-slate-800/40">
+                                                                {versions.map((ver) => (
+                                                                    <div
+                                                                        key={ver.id}
+                                                                        className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-900/60 transition-colors text-xs"
+                                                                    >
+                                                                        {/* File Name & Quality Badge */}
+                                                                        <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
+                                                                            <span className="text-slate-600 text-xs font-mono select-none">└</span>
+                                                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
+                                                                                {ver.quality_label}
+                                                                            </span>
+                                                                            <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_name}>
+                                                                                {ver.file_name}
+                                                                            </span>
+                                                                        </div>
+
+                                                                        {/* Metadata & Actions Right Aligned */}
+                                                                        <div className="flex items-center gap-6 shrink-0 text-slate-400">
+                                                                            <span className="text-slate-400 text-xs">{ver.storage_box?.name || 'Storage Box'}</span>
+
+                                                                            <span className="font-mono font-semibold text-emerald-400 text-xs w-20 text-right">
+                                                                                {(ver.file_size / 1073741824).toFixed(2)} GB
+                                                                            </span>
+
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => toggleActive(ver.id)}
+                                                                                className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+                                                                                    ver.is_active
+                                                                                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                                                        : 'bg-slate-800 text-slate-500 border border-slate-700'
+                                                                                }`}
+                                                                            >
+                                                                                {ver.is_active ? 'Aktif' : 'Pasif'}
+                                                                            </button>
+
+                                                                            <div className="flex items-center gap-3 w-24 justify-end">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => syncTmdbSingle(ver.id)}
+                                                                                    disabled={syncingId === ver.id}
+                                                                                    className="text-xs text-slate-300 hover:text-white font-medium"
+                                                                                >
+                                                                                    {syncingId === ver.id ? '...' : 'TMDB'}
+                                                                                </button>
+
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => deleteMedia(ver.id, ver.file_name)}
+                                                                                    className="text-xs text-slate-400 hover:text-rose-400 font-medium transition-colors"
+                                                                                >
+                                                                                    Sil
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </Fragment>
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>
