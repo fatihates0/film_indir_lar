@@ -41,6 +41,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     Route::get('/media', [MediaController::class, 'index'])->name('media.index');
+    Route::get('/media/actor/{name}', [MediaController::class, 'actorMedia'])->name('media.actor');
     Route::get('/media/{media}', [MediaController::class, 'show'])->name('media.show');
     Route::post('/media/{media}/download', [MediaController::class, 'authorizeDownload'])->name('media.authorize-download');
 

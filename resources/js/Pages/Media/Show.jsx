@@ -20,6 +20,25 @@ export default function MediaShow({
     const [mediaInfoModal, setMediaInfoModal] = useState(null);
     const [errorMessage, setErrorMessage] = useState(null);
     const [copied, setCopied] = useState(false);
+    const [selectedActor, setSelectedActor] = useState(null);
+    const [actorMediaLoading, setActorMediaLoading] = useState(false);
+    const [actorMediaList, setActorMediaList] = useState([]);
+
+    const castList = Array.isArray(item.cast) ? item.cast : [];
+
+    const handleActorClick = async (actor) => {
+        setSelectedActor(actor);
+        setActorMediaLoading(true);
+        setActorMediaList([]);
+        try {
+            const res = await axios.get(route('media.actor', encodeURI(actor.name)));
+            setActorMediaList(res.data.media || []);
+        } catch (err) {
+            console.error('Failed to fetch actor media:', err);
+        } finally {
+            setActorMediaLoading(false);
+        }
+    };
 
     const genresList = Array.isArray(item.genres)
         ? item.genres
@@ -359,6 +378,67 @@ export default function MediaShow({
                     </div>
                 )}
 
+                {/* ============================================================== */}
+                {/* OYUNCU KADROSU (CAST LIST) SECTION */}
+                {/* ============================================================== */}
+                {castList.length > 0 && (
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 text-left">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-4">
+                            <div>
+                                <h2 className="font-display font-bold text-2xl text-white flex items-center gap-3">
+                                    <span>🎭 Oyuncu Kadrosu</span>
+                                    <span className="text-xs font-semibold px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                        {castList.length} Oyuncu
+                                    </span>
+                                </h2>
+                                <p className="text-xs text-slate-400 mt-1">
+                                    Oyuncuya tıklayarak arşivimizde yer alan diğer film ve dizilerini görüntüleyebilirsiniz.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Cast Grid Cards */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                            {castList.map((actor, idx) => (
+                                <button
+                                    key={actor.id || idx}
+                                    onClick={() => handleActorClick(actor)}
+                                    className="group flex flex-col items-center text-center p-3.5 rounded-2xl glass-card border border-white/5 hover:border-indigo-500/50 hover:bg-slate-900/80 transition-all duration-300 hover:-translate-y-1 shadow-lg cursor-pointer"
+                                >
+                                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-white/10 group-hover:border-indigo-400 transition-colors shadow-md relative bg-slate-900 mb-3 shrink-0">
+                                        {actor.profile_url ? (
+                                            <img
+                                                src={actor.profile_url}
+                                                alt={actor.name}
+                                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 text-slate-300 font-bold text-2xl">
+                                                {actor.name ? actor.name.charAt(0) : '👤'}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <h4 className="font-bold text-xs text-white group-hover:text-indigo-300 transition-colors line-clamp-1 w-full">
+                                        {actor.name}
+                                    </h4>
+
+                                    {actor.character && (
+                                        <p className="text-[10px] text-slate-400 font-medium line-clamp-1 w-full mt-0.5">
+                                            {actor.character}
+                                        </p>
+                                    )}
+
+                                    <div className="mt-2 text-[10px] font-bold text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                        <span>Diğer Yapımları</span>
+                                        <span>→</span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* Related Media Section */}
                 {related && related.length > 0 && (
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 text-left">
@@ -551,6 +631,131 @@ export default function MediaShow({
                                     className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple"
                                 >
                                     İndirme Bağlantısı Al
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Actor Other Media Popup Modal */}
+                {selectedActor && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+                        <div className="w-full max-w-3xl glass-panel rounded-3xl border border-white/15 p-6 shadow-2xl space-y-6 text-left relative max-h-[90vh] overflow-y-auto">
+                            {/* Header */}
+                            <div className="flex items-start justify-between border-b border-white/10 pb-4">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-indigo-500/40 shrink-0 bg-slate-900 shadow-md">
+                                        {selectedActor.profile_url ? (
+                                            <img src={selectedActor.profile_url} alt={selectedActor.name} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 text-white font-bold text-xl">
+                                                {selectedActor.name?.charAt(0) || '👤'}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="font-display font-bold text-xl text-white">{selectedActor.name}</h3>
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                                Arşiv Arama
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 mt-0.5">
+                                            {selectedActor.character ? `Karakter: ${selectedActor.character}` : 'Oyuncunun arşivimizdeki diğer film ve dizileri'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setSelectedActor(null)}
+                                    className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            {/* Body Content */}
+                            {actorMediaLoading ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 py-8">
+                                    {[1, 2, 3].map((i) => (
+                                        <div key={i} className="animate-pulse space-y-3 p-3 rounded-2xl bg-slate-900/60 border border-white/5">
+                                            <div className="aspect-[2/3] bg-slate-800 rounded-xl"></div>
+                                            <div className="h-4 bg-slate-800 rounded w-3/4"></div>
+                                            <div className="h-3 bg-slate-800 rounded w-1/2"></div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : actorMediaList.length > 0 ? (
+                                <div className="space-y-4">
+                                    <div className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                                        <span>🎬 Arşivde Bulunan Yapımları</span>
+                                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[11px] border border-emerald-500/30">
+                                            {actorMediaList.length} Adet
+                                        </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                                        {actorMediaList.map((m) => (
+                                            <Link
+                                                key={m.id}
+                                                href={route('media.show', m.id)}
+                                                onClick={() => setSelectedActor(null)}
+                                                className="group rounded-2xl glass-card overflow-hidden border border-white/10 hover:border-indigo-500/50 hover:scale-[1.03] transition-all bg-slate-950/60 flex flex-col"
+                                            >
+                                                <div className="aspect-[2/3] w-full overflow-hidden bg-slate-900 relative">
+                                                    {m.poster_url ? (
+                                                        <img
+                                                            src={m.poster_url}
+                                                            alt={m.title}
+                                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-full h-full p-4 flex items-center justify-center text-center text-xs font-bold text-slate-400">
+                                                            {m.title}
+                                                        </div>
+                                                    )}
+                                                    <div className="absolute top-2 right-2">
+                                                        <span className="px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-black/80 backdrop-blur-md text-indigo-300 border border-white/10">
+                                                            {m.type === 'series' || m.type === 'episode' ? 'Dizi' : 'Film'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="p-3 space-y-1 flex-1 flex flex-col justify-between">
+                                                    <div>
+                                                        <h4 className="font-bold text-xs text-white group-hover:text-indigo-300 line-clamp-1">
+                                                            {m.title}
+                                                        </h4>
+                                                        {m.original_title && m.original_title !== m.title && (
+                                                            <p className="text-[10px] text-slate-400 italic line-clamp-1">{m.original_title}</p>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-2 border-t border-white/5">
+                                                        <span>{m.year || 'N/A'}</span>
+                                                        <span className="font-bold text-emerald-400">{m.quality_label}</span>
+                                                    </div>
+                                                </div>
+                                            </Link>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 px-4 space-y-3 rounded-2xl bg-slate-950/40 border border-white/5">
+                                    <div className="text-4xl">🎬</div>
+                                    <h4 className="font-bold text-slate-200 text-base">Arşivimizde Başka Yapım Bulunamadı</h4>
+                                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                                        <span className="text-indigo-300 font-semibold">{selectedActor.name}</span> isimli oyuncunun bu içerik haricindeki diğer filmleri henüz sistemimize eklenmemiştir.
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Footer */}
+                            <div className="flex items-center justify-end pt-2 border-t border-white/10">
+                                <button
+                                    onClick={() => setSelectedActor(null)}
+                                    className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple"
+                                >
+                                    Kapat
                                 </button>
                             </div>
                         </div>

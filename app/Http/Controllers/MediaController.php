@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Media;
 use App\Services\DownloadAuthorizationService;
 use App\Services\QuotaService;
+use App\Services\TmdbService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
@@ -141,6 +143,15 @@ class MediaController extends Controller
     {
         $user = $request->user();
         $quota = $this->quotaService->ensureCurrentPeriod($user);
+
+        if (empty($media->cast) && $media->tmdb_id) {
+            try {
+                app(TmdbService::class)->fetchAndApply($media);
+                $media->refresh();
+            } catch (\Throwable $e) {
+                // ignore
+            }
+        }
 
         // Fetch ALL items in the same group
         $groupQuery = Media::where('is_active', true)->where('is_available', true);
@@ -291,5 +302,58 @@ class MediaController extends Controller
                 'message' => $e->getMessage(),
             ], 422);
         }
+    }
+
+    public function actorMedia(string $name): JsonResponse
+    {
+        $decodedName = trim(urldecode($name));
+
+        if (empty($decodedName)) {
+            return response()->json(['media' => [], 'count' => 0]);
+        }
+
+        $items = Media::where('is_active', true)
+            ->where('is_available', true)
+            ->where(function ($q) use ($decodedName) {
+                $q->whereJsonContains('cast', [['name' => $decodedName]])
+                    ->orWhere('cast', 'like', '%'.str_replace(['%', '_'], ['\%', '\_'], $decodedName).'%');
+            })
+            ->get()
+            ->groupBy(function ($item) {
+                return $item->tmdb_id ? 'tmdb_'.$item->tmdb_id : 'title_'.Str::slug($item->title);
+            })
+            ->map(function ($group) {
+                $rep = $group->sortByDesc(function ($i) {
+                    $score = 0;
+                    if ($i->poster_path) {
+                        $score += 10;
+                    }
+                    if (preg_match('/2160p|4k/i', $i->quality_label)) {
+                        $score += 4;
+                    }
+
+                    return $score;
+                })->first();
+
+                return [
+                    'id' => $rep->id,
+                    'title' => $rep->title,
+                    'original_title' => $rep->original_title,
+                    'year' => $rep->year,
+                    'type' => $rep->type->value,
+                    'poster_url' => $rep->poster_url,
+                    'backdrop_url' => $rep->backdrop_url,
+                    'vote_average' => $rep->vote_average,
+                    'quality_label' => $rep->quality_label,
+                    'versions_count' => $group->count(),
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'actor' => $decodedName,
+            'media' => $items,
+            'count' => $items->count(),
+        ]);
     }
 }

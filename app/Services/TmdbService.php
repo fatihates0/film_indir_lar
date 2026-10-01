@@ -156,7 +156,7 @@ class TmdbService
                 ->get("{$this->baseUrl}/movie/{$tmdbId}", [
                     'api_key' => $this->apiKey,
                     'language' => $language,
-                    'append_to_response' => 'external_ids',
+                    'append_to_response' => 'credits,external_ids',
                 ]);
 
             if ($response->successful()) {
@@ -169,7 +169,7 @@ class TmdbService
                 ->get("{$this->baseUrl}/movie/{$tmdbId}", [
                     'api_key' => $this->apiKey,
                     'language' => 'en-US',
-                    'append_to_response' => 'external_ids',
+                    'append_to_response' => 'credits,external_ids',
                 ]);
 
             return $fallback->successful() ? $fallback->json() : null;
@@ -191,7 +191,7 @@ class TmdbService
                 ->get("{$this->baseUrl}/tv/{$tmdbId}", [
                     'api_key' => $this->apiKey,
                     'language' => $language,
-                    'append_to_response' => 'external_ids',
+                    'append_to_response' => 'aggregate_credits,credits,external_ids',
                 ]);
 
             if ($response->successful()) {
@@ -203,7 +203,7 @@ class TmdbService
                 ->get("{$this->baseUrl}/tv/{$tmdbId}", [
                     'api_key' => $this->apiKey,
                     'language' => 'en-US',
-                    'append_to_response' => 'external_ids',
+                    'append_to_response' => 'aggregate_credits,credits,external_ids',
                 ]);
 
             return $fallback->successful() ? $fallback->json() : null;
@@ -333,6 +333,26 @@ class TmdbService
             }
         }
 
+        $cast = [];
+        $rawCast = $details['credits']['cast'] ?? $details['aggregate_credits']['cast'] ?? [];
+        if (! empty($rawCast)) {
+            foreach (array_slice($rawCast, 0, 15) as $person) {
+                $character = $person['character'] ?? null;
+                if (! $character && ! empty($person['roles'][0]['character'])) {
+                    $character = $person['roles'][0]['character'];
+                }
+                $profilePath = $person['profile_path'] ?? null;
+
+                $cast[] = [
+                    'id' => $person['id'] ?? null,
+                    'name' => $person['name'] ?? $person['original_name'] ?? 'Oyuncu',
+                    'character' => $character ?: null,
+                    'profile_path' => $profilePath,
+                    'profile_url' => $profilePath ? 'https://image.tmdb.org/t/p/w185/'.ltrim($profilePath, '/') : null,
+                ];
+            }
+        }
+
         $media->update([
             'tmdb_id' => $details['id'] ?? null,
             'title' => $title,
@@ -344,6 +364,7 @@ class TmdbService
             'vote_average' => $details['vote_average'] ?? $media->vote_average,
             'vote_count' => $details['vote_count'] ?? $media->vote_count,
             'genres' => $genres ?: $media->genres,
+            'cast' => ! empty($cast) ? $cast : $media->cast,
             'release_date' => $releaseDate,
             'imdb_id' => $details['external_ids']['imdb_id'] ?? $details['imdb_id'] ?? null,
             'tagline' => $details['tagline'] ?? null,
