@@ -436,32 +436,68 @@ query_tmdb() {
             $apiKey = $argv[4];
 
             $endpoint = ($mediaType === "series") ? "tv" : "movie";
-            $url = "https://api.themoviedb.org/3/search/{$endpoint}?api_key={$apiKey}&query=" . urlencode($title) . "&language=en-US";
-            if (!empty($year)) {
-                $param = ($mediaType === "series") ? "first_air_date_year" : "year";
-                $url .= "&{$param}={$year}";
-            }
 
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            $json = curl_exec($ch);
-            curl_close($ch);
-
-            $data = json_decode($json, true);
-            $results = $data["results"] ?? array();
-
-            if (empty($results) && !empty($year)) {
-                $url = "https://api.themoviedb.org/3/search/{$endpoint}?api_key={$apiKey}&query=" . urlencode($title) . "&language=en-US";
+            $fetchUrl = function($url) {
                 $ch = curl_init($url);
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 10);
                 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
                 $json = curl_exec($ch);
                 curl_close($ch);
-                $data = json_decode($json, true);
+                return json_decode($json, true);
+            };
+
+            $buildUrl = function($q, $lang = "en-US", $y = "") use ($endpoint, $apiKey) {
+                $u = "https://api.themoviedb.org/3/search/{$endpoint}?api_key={$apiKey}&query=" . urlencode($q) . "&language={$lang}";
+                if (!empty($y)) {
+                    $param = ($endpoint === "tv") ? "first_air_date_year" : "year";
+                    $u .= "&{$param}={$y}";
+                }
+                return $u;
+            };
+
+            $results = array();
+
+            // 1. Arama: en-US + year
+            $data = $fetchUrl($buildUrl($title, "en-US", $year));
+            $results = $data["results"] ?? array();
+
+            // 2. Arama: tr-TR + year (Türkçe isimli filmler/diziler için)
+            if (empty($results)) {
+                $data = $fetchUrl($buildUrl($title, "tr-TR", $year));
                 $results = $data["results"] ?? array();
+            }
+
+            // 3. Arama: en-US (yıl olmadan)
+            if (empty($results) && !empty($year)) {
+                $data = $fetchUrl($buildUrl($title, "en-US", ""));
+                $results = $data["results"] ?? array();
+            }
+
+            // 4. Arama: tr-TR (yıl olmadan)
+            if (empty($results) && !empty($year)) {
+                $data = $fetchUrl($buildUrl($title, "tr-TR", ""));
+                $results = $data["results"] ?? array();
+            }
+
+            // 5. Kelime çıkarma toleransı (Yazım hataları/Typo toleransı için)
+            if (empty($results)) {
+                $words = preg_split("/\s+/", $title);
+                if (count($words) > 2) {
+                    for ($i = 0; $i < count($words); $i++) {
+                        $subWords = $words;
+                        unset($subWords[$i]);
+                        $subTitle = implode(" ", $subWords);
+                        if (strlen($subTitle) >= 3) {
+                            $data = $fetchUrl($buildUrl($subTitle, "en-US", ""));
+                            $res = $data["results"] ?? array();
+                            if (!empty($res)) {
+                                $results = $res;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
 
             if (empty($results)) {
@@ -470,36 +506,108 @@ query_tmdb() {
             }
 
             $first = $results[0];
-            if ($mediaType === "series") {
+            if ($endpoint === "tv") {
                 $tmdbTitle = $first["name"] ?? $first["original_name"] ?? "";
-                $airDate = $first["first_air_date"] ?? "";
-                $tmdbYear = !empty($airDate) ? explode("-", $airDate)[0] : "";
+                $tmdbOrig  = $first["original_name"] ?? "";
+                $airDate   = $first["first_air_date"] ?? "";
+                $tmdbYear  = !empty($airDate) ? explode("-", $airDate)[0] : "";
             } else {
                 $tmdbTitle = $first["title"] ?? $first["original_title"] ?? "";
-                $relDate = $first["release_date"] ?? "";
-                $tmdbYear = !empty($relDate) ? explode("-", $relDate)[0] : "";
+                $tmdbOrig  = $first["original_title"] ?? "";
+                $relDate   = $first["release_date"] ?? "";
+                $tmdbYear  = !empty($relDate) ? explode("-", $relDate)[0] : "";
             }
 
-            $sq = chr(39);
-            $map = array("’"=>$sq, "‘"=>$sq, "`"=>$sq, "´"=>$sq);
-            $normSearch = preg_replace("/[^a-z0-9]/", "", strtolower(strtr($title, $map)));
-            $normTmdb   = preg_replace("/[^a-z0-9]/", "", strtolower(strtr($tmdbTitle, $map)));
-
-            $isConfident = 0;
-            if ($normSearch === $normTmdb) {
-                $isConfident = 1;
-            } elseif (!empty($normSearch) && !empty($normTmdb) && (strpos($normTmdb, $normSearch) !== false || strpos($normSearch, $normTmdb) !== false)) {
-                $isConfident = 1;
-            } else {
-                similar_text($normSearch, $normTmdb, $percent);
-                if ($percent >= 55.0) {
-                    $isConfident = 1;
+            // Türkçe başlığı da çek (Uyanışlar -> Awakenings gibi Türkçe aramalar için)
+            $trTitle = "";
+            $id = $first["id"] ?? null;
+            if ($id) {
+                $trData = $fetchUrl("https://api.themoviedb.org/3/{$endpoint}/{$id}?api_key={$apiKey}&language=tr-TR");
+                if (!empty($trData)) {
+                    $trTitle = ($endpoint === "tv") ? ($trData["name"] ?? "") : ($trData["title"] ?? "");
                 }
             }
 
-            if (!empty($year) && !empty($tmdbYear) && $normSearch !== $normTmdb) {
+            $sq = chr(39);
+            $map = array(
+                "’"=>$sq, "‘"=>$sq, "`"=>$sq, "´"=>$sq,
+                "ç"=>"c", "Ç"=>"C", "ğ"=>"g", "Ğ"=>"G", "ı"=>"i", "İ"=>"I",
+                "ö"=>"o", "Ö"=>"O", "ş"=>"s", "Ş"=>"S", "ü"=>"u", "Ü"=>"U",
+                "â"=>"a", "Â"=>"A", "î"=>"i", "Î"=>"I", "û"=>"u", "Û"=>"U"
+            );
+
+            $normalize = function($str) use ($map) {
+                $str = strtr($str, $map);
+                return preg_replace("/[^a-z0-9]/", "", strtolower($str));
+            };
+
+            $getWords = function($str) use ($map) {
+                $str = strtr($str, $map);
+                $clean = preg_replace("/[^a-z0-9\s]/", " ", strtolower($str));
+                $w = preg_split("/\s+/", $clean);
+                return array_values(array_filter($w, function($item) { return strlen($item) > 1; }));
+            };
+
+            $nSearch = $normalize($title);
+            $nEn     = $normalize($tmdbTitle);
+            $nOrig   = $normalize($tmdbOrig);
+            $nTr     = $normalize($trTitle);
+
+            $isConfident = 0;
+            $candidates = array_values(array_unique(array_filter(array($nEn, $nOrig, $nTr))));
+
+            foreach ($candidates as $cN) {
+                if (empty($cN) || empty($nSearch)) continue;
+                if ($nSearch === $cN) {
+                    $isConfident = 1;
+                    break;
+                }
+                if (strlen($nSearch) >= 4 && strlen($cN) >= 4) {
+                    if (strpos($cN, $nSearch) !== false || strpos($nSearch, $cN) !== false) {
+                        $isConfident = 1;
+                        break;
+                    }
+                }
+                similar_text($nSearch, $cN, $percent);
+                if ($percent >= 35.0) {
+                    $isConfident = 1;
+                    break;
+                }
+            }
+
+            if (!$isConfident) {
+                $searchWords = $getWords($title);
+                $candTitles  = array_values(array_unique(array_filter(array($tmdbTitle, $tmdbOrig, $trTitle))));
+
+                foreach ($candTitles as $cT) {
+                    $cWords = $getWords($cT);
+                    if (empty($searchWords) || empty($cWords)) continue;
+
+                    $matches = 0;
+                    foreach ($searchWords as $sw) {
+                        foreach ($cWords as $cw) {
+                            if ($sw === $cw) {
+                                $matches++;
+                                break;
+                            }
+                            if (strlen($sw) >= 4 && strlen($cw) >= 4 && levenshtein($sw, $cw) <= 2) {
+                                $matches++;
+                                break;
+                            }
+                        }
+                    }
+
+                    $overlapRatio = $matches / max(1, count($searchWords));
+                    if ($overlapRatio >= 0.35 || $matches >= 2) {
+                        $isConfident = 1;
+                        break;
+                    }
+                }
+            }
+
+            if ($isConfident && !empty($year) && !empty($tmdbYear)) {
                 $diff = abs((int)$year - (int)$tmdbYear);
-                if ($diff > 3) {
+                if ($diff > 5 && $nSearch !== $nEn && $nSearch !== $nOrig && $nSearch !== $nTr) {
                     $isConfident = 0;
                 }
             }
