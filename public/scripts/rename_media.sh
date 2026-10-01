@@ -585,7 +585,7 @@ query_tmdb() {
             $buildUrl = function($q, $lang = "en-US", $y = "") use ($endpoint, $apiKey) {
                 $u = "https://api.themoviedb.org/3/search/{$endpoint}?api_key={$apiKey}&query=" . urlencode($q) . "&language={$lang}";
                 if (!empty($y)) {
-                    $param = ($endpoint === "tv") ? "first_air_date_year" : "year";
+                    $param = ($endpoint === "tv") ? "first_air_date_year" : "primary_release_year";
                     $u .= "&{$param}={$y}";
                 }
                 return $u;
@@ -593,11 +593,11 @@ query_tmdb() {
 
             $results = array();
 
-            // 1. Arama: en-US + year
+            // 1. Arama: en-US + year (primary_release_year / first_air_date_year)
             $data = $fetchUrl($buildUrl($title, "en-US", $year));
             $results = $data["results"] ?? array();
 
-            // 2. Arama: tr-TR + year (Türkçe isimli filmler/diziler için)
+            // 2. Arama: tr-TR + year
             if (empty($results)) {
                 $data = $fetchUrl($buildUrl($title, "tr-TR", $year));
                 $results = $data["results"] ?? array();
@@ -640,29 +640,6 @@ query_tmdb() {
                 exit;
             }
 
-            $first = $results[0];
-            if ($endpoint === "tv") {
-                $tmdbTitle = $first["name"] ?? $first["original_name"] ?? "";
-                $tmdbOrig  = $first["original_name"] ?? "";
-                $airDate   = $first["first_air_date"] ?? "";
-                $tmdbYear  = !empty($airDate) ? explode("-", $airDate)[0] : "";
-            } else {
-                $tmdbTitle = $first["title"] ?? $first["original_title"] ?? "";
-                $tmdbOrig  = $first["original_title"] ?? "";
-                $relDate   = $first["release_date"] ?? "";
-                $tmdbYear  = !empty($relDate) ? explode("-", $relDate)[0] : "";
-            }
-
-            // Türkçe başlığı da çek (Uyanışlar -> Awakenings gibi Türkçe aramalar için)
-            $trTitle = "";
-            $id = $first["id"] ?? null;
-            if ($id) {
-                $trData = $fetchUrl("https://api.themoviedb.org/3/{$endpoint}/{$id}?api_key={$apiKey}&language=tr-TR");
-                if (!empty($trData)) {
-                    $trTitle = ($endpoint === "tv") ? ($trData["name"] ?? "") : ($trData["title"] ?? "");
-                }
-            }
-
             $sq = chr(39);
             $map = array(
                 "’"=>$sq, "‘"=>$sq, "`"=>$sq, "´"=>$sq,
@@ -684,70 +661,88 @@ query_tmdb() {
             };
 
             $nSearch = $normalize($title);
-            $nEn     = $normalize($tmdbTitle);
-            $nOrig   = $normalize($tmdbOrig);
-            $nTr     = $normalize($trTitle);
+            $searchWords = $getWords($title);
 
-            $isConfident = 0;
-            $candidates = array_values(array_unique(array_filter(array($nEn, $nOrig, $nTr))));
+            $bestCandidate = null;
+            $bestScore = -999;
 
-            foreach ($candidates as $cN) {
-                if (empty($cN) || empty($nSearch)) continue;
-                if ($nSearch === $cN) {
-                    $isConfident = 1;
-                    break;
+            foreach (array_slice($results, 0, 10) as $itemCandidate) {
+                if ($endpoint === "tv") {
+                    $cTitle = $itemCandidate["name"] ?? $itemCandidate["original_name"] ?? "";
+                    $cOrig  = $itemCandidate["original_name"] ?? "";
+                    $cDate  = $itemCandidate["first_air_date"] ?? "";
+                } else {
+                    $cTitle = $itemCandidate["title"] ?? $itemCandidate["original_title"] ?? "";
+                    $cOrig  = $itemCandidate["original_title"] ?? "";
+                    $cDate  = $itemCandidate["release_date"] ?? "";
                 }
-                if (strlen($nSearch) >= 4 && strlen($cN) >= 4) {
-                    if (strpos($cN, $nSearch) !== false || strpos($nSearch, $cN) !== false) {
-                        $isConfident = 1;
-                        break;
-                    }
-                }
-                similar_text($nSearch, $cN, $percent);
-                if ($percent >= 35.0) {
-                    $isConfident = 1;
-                    break;
-                }
-            }
+                $cYear = !empty($cDate) ? explode("-", $cDate)[0] : "";
 
-            if (!$isConfident) {
-                $searchWords = $getWords($title);
-                $candTitles  = array_values(array_unique(array_filter(array($tmdbTitle, $tmdbOrig, $trTitle))));
+                $nEn   = $normalize($cTitle);
+                $nOrig = $normalize($cOrig);
 
-                foreach ($candTitles as $cT) {
-                    $cWords = $getWords($cT);
-                    if (empty($searchWords) || empty($cWords)) continue;
+                $score = 0;
+                $isExactMatch = ($nSearch === $nEn || $nSearch === $nOrig);
 
+                if ($isExactMatch) {
+                    $score += 100;
+                } else {
+                    similar_text($nSearch, $nEn, $p1);
+                    similar_text($nSearch, $nOrig, $p2);
+                    $maxPct = max($p1, $p2);
+                    $score += ($maxPct * 0.7);
+
+                    // Kelime çakışması hesabı
+                    $cWords = $getWords($cTitle . " " . $cOrig);
                     $matches = 0;
                     foreach ($searchWords as $sw) {
                         foreach ($cWords as $cw) {
-                            if ($sw === $cw) {
-                                $matches++;
-                                break;
-                            }
-                            if (strlen($sw) >= 4 && strlen($cw) >= 4 && levenshtein($sw, $cw) <= 2) {
+                            if ($sw === $cw || (strlen($sw) >= 4 && strlen($cw) >= 4 && levenshtein($sw, $cw) <= 2)) {
                                 $matches++;
                                 break;
                             }
                         }
                     }
-
-                    $overlapRatio = $matches / max(1, count($searchWords));
-                    if ($overlapRatio >= 0.35 || $matches >= 2) {
-                        $isConfident = 1;
-                        break;
+                    if (!empty($searchWords)) {
+                        $overlapRatio = $matches / count($searchWords);
+                        $score += ($overlapRatio * 30);
                     }
                 }
-            }
 
-            if ($isConfident && !empty($year) && !empty($tmdbYear)) {
-                $diff = abs((int)$year - (int)$tmdbYear);
-                if ($diff > 5 && $nSearch !== $nEn && $nSearch !== $nOrig && $nSearch !== $nTr) {
-                    $isConfident = 0;
+                if (!empty($year) && !empty($cYear)) {
+                    $yearDiff = abs((int)$year - (int)$cYear);
+                    if ($yearDiff === 0) {
+                        $score += 30;
+                    } elseif ($yearDiff === 1) {
+                        $score += 15;
+                    } elseif ($yearDiff > 5 && !$isExactMatch) {
+                        $score -= 60;
+                    }
+                }
+
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $bestCandidate = array(
+                        "item" => $itemCandidate,
+                        "title" => $cTitle,
+                        "orig" => $cOrig,
+                        "year" => $cYear,
+                        "score" => $score,
+                        "confident" => ($score >= 35) ? 1 : 0
+                    );
                 }
             }
 
-            echo "{$tmdbTitle}|{$tmdbYear}|{$isConfident}";
+            if (!$bestCandidate) {
+                echo "";
+                exit;
+            }
+
+            $selectedTitle = $bestCandidate["title"];
+            $selectedYear  = $bestCandidate["year"];
+            $isConfident   = $bestCandidate["confident"];
+
+            echo "{$selectedTitle}|{$selectedYear}|{$isConfident}";
         ' "$title" "$year" "$media_type" "$TMDB_API_KEY" 2>/dev/null
     fi
 }
