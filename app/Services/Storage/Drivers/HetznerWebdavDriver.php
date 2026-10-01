@@ -124,8 +124,9 @@ class HetznerWebdavDriver extends AbstractStorageDriver
             $currentPath = $baseHost;
             foreach ($folderSegments as $segment) {
                 $currentPath .= '/'.rawurlencode($segment);
-                $chMk = curl_init($currentPath);
+                $chMk = curl_init($currentPath.'/');
                 curl_setopt($chMk, CURLOPT_USERPWD, "{$username}:{$password}");
+                curl_setopt($chMk, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
                 curl_setopt($chMk, CURLOPT_CUSTOMREQUEST, 'MKCOL');
                 curl_setopt($chMk, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($chMk, CURLOPT_SSL_VERIFYPEER, false);
@@ -156,6 +157,7 @@ class HetznerWebdavDriver extends AbstractStorageDriver
         $chPut = curl_init();
         curl_setopt($chPut, CURLOPT_URL, $destUrl);
         curl_setopt($chPut, CURLOPT_USERPWD, "{$username}:{$password}");
+        curl_setopt($chPut, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
         curl_setopt($chPut, CURLOPT_PUT, true);
         curl_setopt($chPut, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($chPut, CURLOPT_SSL_VERIFYPEER, false);
