@@ -14,7 +14,6 @@ use InvalidArgumentException;
 class DownloadAuthorizationService
 {
     public function __construct(
-        protected QuotaService $quotaService,
         protected StorageBoxService $storageBoxService,
     ) {}
 
@@ -67,23 +66,6 @@ class DownloadAuthorizationService
                 'session' => $existingSession,
                 'expires_at' => $existingSession->expires_at->toIso8601String(),
             ];
-        }
-
-        // Check concurrent active download sessions limit for DIFFERENT media files
-        $maxConcurrent = $user->max_concurrent_downloads ?: config('downloads.max_concurrent', 5);
-        $activeCount = DownloadSession::where('user_id', $user->id)
-            ->where('status', DownloadStatus::ACTIVE)
-            ->where('expires_at', '>', Carbon::now())
-            ->count();
-
-        if ($activeCount >= $maxConcurrent) {
-            throw new InvalidArgumentException("Aynı anda en fazla {$maxConcurrent} farklı medya indirmesi gerçekleştirebilirsiniz.");
-        }
-
-        // Check quota availability
-        $quota = $this->quotaService->ensureCurrentPeriod($user);
-        if ($quota->remaining_bytes <= 0) {
-            throw new InvalidArgumentException('Aylık indirme kotanız dolmuştur.');
         }
 
         // Generate session token

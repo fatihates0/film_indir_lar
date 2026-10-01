@@ -16,7 +16,7 @@ export default function AdminDashboard({ stats, system_status }) {
                             </span>
                             <h1 className="font-display font-black text-3xl text-white tracking-tight">Sistem Yönetim Merkezi</h1>
                         </div>
-                        <p className="text-xs text-slate-400 mt-1">Sunucu durumları, Storage Box uzaktan aktarımları, Jellyfin senkronizasyonu ve kullanıcı kotaları.</p>
+                        <p className="text-xs text-slate-400 mt-1">Sunucu durumları, Storage Box uzaktan aktarımları, Jellyfin senkronizasyonu ve kullanıcı yönetimi.</p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -30,7 +30,7 @@ export default function AdminDashboard({ stats, system_status }) {
                             href={route('admin.users.index')}
                             className="px-4 py-2.5 rounded-xl glass-panel text-slate-200 hover:text-white hover:border-indigo-500/40 text-xs font-bold transition-all"
                         >
-                            👥 Kullanıcılar & Kota
+                            👥 Kullanıcılar
                         </Link>
                         <Link
                             href={route('admin.jellyfin.index')}
@@ -117,17 +117,15 @@ export default function AdminDashboard({ stats, system_status }) {
                     </div>
 
                     <div className="glass-card rounded-3xl p-6 border border-white/10 space-y-2">
-                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Toplam Atanan Kota</div>
-                        <div className="font-display font-black text-4xl text-purple-400">{rawStats.total_quota_tb ?? 0} TB</div>
-                        <div className="text-xs text-slate-400 font-medium">Harcanan: {rawStats.total_used_tb ?? 0} TB</div>
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Aktif İndirmeler</div>
+                        <div className="font-display font-black text-4xl text-purple-400">{rawStats.active_downloads ?? 0}</div>
+                        <div className="text-xs text-slate-400 font-medium">Anlık İndirme Oturumu</div>
                     </div>
 
                     <div className="glass-card rounded-3xl p-6 border border-white/10 space-y-2">
-                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Bugünkü Toplam Trafik</div>
-                        <div className="font-display font-black text-4xl text-cyan-400">
-                            {((rawStats.today_download_gb || 0) + (rawStats.today_plex_gb || 0)).toFixed(2)} GB
-                        </div>
-                        <div className="text-xs text-slate-400 font-medium">İndirme: {rawStats.today_download_gb ?? 0} GB | Plex: {rawStats.today_plex_gb ?? 0} GB</div>
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Aktif Plex / Jellyfin</div>
+                        <div className="font-display font-black text-4xl text-cyan-400">{rawStats.active_plex_sessions ?? 0}</div>
+                        <div className="text-xs text-slate-400 font-medium">Canlı İzleme Oturumu</div>
                     </div>
                 </div>
 
@@ -159,8 +157,8 @@ export default function AdminDashboard({ stats, system_status }) {
                                 👥
                             </div>
                             <div>
-                                <h3 className="font-display font-bold text-lg text-white">Kullanıcı & Kota Limitleri</h3>
-                                <p className="text-xs text-slate-400">Kullanıcıların aylık GB indirme kotasını düzenleyin veya admin yetkisi verin.</p>
+                                <h3 className="font-display font-bold text-lg text-white">Kullanıcı Yönetimi</h3>
+                                <p className="text-xs text-slate-400">Kullanıcıların indirme ve Plex/Jellyfin erişim yetkilerini düzenleyin.</p>
                             </div>
                         </div>
                         <div className="pt-2">

@@ -2,20 +2,16 @@
 
 namespace App\Services;
 
-use App\DTOs\UsageContext;
 use App\Enums\DownloadStatus;
-use App\Enums\UsageSource;
 use App\Models\DownloadSession;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DownloadService
 {
     public function __construct(
-        protected QuotaService $quotaService,
         protected StorageBoxService $storageBoxService,
     ) {}
 
@@ -49,7 +45,7 @@ class DownloadService
             $baseHost = str_starts_with($host, 'http://') || str_starts_with($host, 'https://') ? rtrim($host, '/') : "https://{$host}";
             $pathSegments = array_filter(explode('/', trim(str_replace('\\', '/', $media->file_path), '/')), fn ($s) => $s !== '');
 
-            $remoteStreamUrl = $baseHost . '/' . implode('/', array_map(fn ($s) => str_replace(' ', '%20', $s), $pathSegments));
+            $remoteStreamUrl = $baseHost.'/'.implode('/', array_map(fn ($s) => str_replace(' ', '%20', $s), $pathSegments));
         }
 
         if (! $isLocalAvailable && ! $remoteStreamUrl) {
@@ -132,7 +128,7 @@ class DownloadService
 
         // If Nginx X-Accel-Redirect is enabled in production config and file is local:
         if ($isLocalAvailable && config('downloads.use_x_accel', false)) {
-            $protectedUrl = config('downloads.x_accel_prefix', '/protected-download/') . ltrim($media->file_path, '/');
+            $protectedUrl = config('downloads.x_accel_prefix', '/protected-download/').ltrim($media->file_path, '/');
 
             return response('', 200, array_merge($headers, [
                 'X-Accel-Redirect' => $protectedUrl,
@@ -180,6 +176,7 @@ class DownloadService
                 curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $chunk) {
                     echo $chunk;
                     flush();
+
                     return strlen($chunk);
                 });
                 curl_setopt($ch, CURLOPT_TIMEOUT, 0);

@@ -23,7 +23,7 @@ export default function Register() {
 
             <div className="space-y-2 text-left">
                 <h2 className="font-display font-extrabold text-2xl text-white">Yeni Hesap Oluştur</h2>
-                <p className="text-xs text-slate-400">Ücretsiz üye olun ve dönemsel indirme kotanızı kullanmaya başlayın.</p>
+                <p className="text-xs text-slate-400">Ücretsiz üye olun ve zengin film ve dizi kütüphanesini kullanmaya başlayın.</p>
             </div>
 
             <form onSubmit={submit} className="space-y-4 text-left">

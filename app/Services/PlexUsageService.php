@@ -2,9 +2,7 @@
 
 namespace App\Services;
 
-use App\DTOs\UsageContext;
 use App\Enums\PlexUsageMode;
-use App\Enums\UsageSource;
 use App\Models\Media;
 use App\Models\PlexAccount;
 use App\Models\PlexUsageSession;
@@ -14,10 +12,6 @@ use Illuminate\Support\Facades\Log;
 
 class PlexUsageService
 {
-    public function __construct(
-        protected QuotaService $quotaService,
-    ) {}
-
     /**
      * Process an incoming Plex session telemetry (Polling or Webhook).
      */
@@ -81,32 +75,11 @@ class PlexUsageService
             // Estimated Bytes = (Seconds * Bitrate) / 8
             $bytesConsumed = (int) round(($deltaSeconds * $mediaBitrate) / 8.0);
 
-            if ($bytesConsumed > 0 && $this->quotaService->canConsume($user, $bytesConsumed)) {
-                try {
-                    $context = new UsageContext(
-                        source: UsageSource::PLEX,
-                        bytes: $bytesConsumed,
-                        mediaId: $media?->id,
-                        eventId: "plex_{$plexSessionId}_{$viewOffsetMs}",
-                        metadata: [
-                            'plex_session_id' => $plexSessionId,
-                            'view_offset_ms' => $viewOffsetMs,
-                            'bitrate_bps' => $mediaBitrate,
-                            'duration_sec' => $deltaSeconds,
-                        ]
-                    );
-
-                    $this->quotaService->consume($user, $context);
-
-                    $session->update([
-                        'usage_bytes' => $session->usage_bytes + $bytesConsumed,
-                        'last_position_ms' => $viewOffsetMs,
-                        'last_seen_at' => $now,
-                    ]);
-                } catch (\Exception $e) {
-                    Log::warning('Plex quota consumption error: ' . $e->getMessage());
-                }
-            }
+            $session->update([
+                'usage_bytes' => $session->usage_bytes + $bytesConsumed,
+                'last_position_ms' => $viewOffsetMs,
+                'last_seen_at' => $now,
+            ]);
         } else {
             $session->update(['last_seen_at' => $now]);
         }

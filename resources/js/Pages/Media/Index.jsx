@@ -3,10 +3,9 @@ import { Head, Link, router } from '@inertiajs/react';
 import axios from 'axios';
 import { useEffect, useState } from 'react';
 
-export default function MediaIndex({ media, allGenres = [], filters = {}, quota = {} }) {
+export default function MediaIndex({ media, allGenres = [], filters = {} }) {
     // Sanitize props
     const rawFilters = (filters && typeof filters === 'object') ? filters : {};
-    const rawQuota = (quota && typeof quota === 'object') ? quota : {};
     const rawMedia = (media && typeof media === 'object') ? media : { data: [], total: 0, links: [] };
     const safeGenres = Array.isArray(allGenres) ? allGenres : [];
     const mediaList = Array.isArray(rawMedia.data) ? rawMedia.data : [];
@@ -126,8 +125,8 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                             ⚡
                         </div>
                         <div>
-                            <div className="text-slate-400 text-[11px]">Kalan Kullanım Kotanız</div>
-                            <div className="text-emerald-400 font-bold text-sm">{rawQuota.remaining_gb ?? 0} GB</div>
+                            <div className="text-slate-400 text-[11px]">İndirme Desteği</div>
+                            <div className="text-emerald-400 font-bold text-sm">Sınırsız Yüksek Hız</div>
                         </div>
                     </div>
                 </div>

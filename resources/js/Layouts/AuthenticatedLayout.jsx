@@ -31,15 +31,6 @@ export default function AuthenticatedLayout({ header, children }) {
         }
     };
 
-    // Calculate quota percentage if user quota exists
-    const quotaPercentage = user?.quota_bytes > 0 
-        ? Math.min(100, Math.round((user.used_quota_bytes / user.quota_bytes) * 100))
-        : 0;
-
-    const remainingGb = user?.quota_bytes > 0
-        ? Math.max(0, ((user.quota_bytes - user.used_quota_bytes) / (1024 * 1024 * 1024))).toFixed(1)
-        : '0';
-
     return (
         <div className="min-h-screen bg-[#08090d] text-slate-100 font-sans selection:bg-indigo-600 selection:text-white antialiased relative">
             {/* Top Glowing Ambient Background */}
@@ -127,29 +118,8 @@ export default function AuthenticatedLayout({ header, children }) {
                             </div>
                         </div>
 
-                        {/* Right Section: Quota Widget & User Profile */}
+                        {/* Right Section: User Profile */}
                         <div className="hidden sm:flex sm:items-center sm:gap-4">
-                            {/* User Quota Badge */}
-                            <Link 
-                                href={route('dashboard')}
-                                className="flex items-center gap-3 px-3.5 py-1.5 rounded-2xl glass-panel hover:border-indigo-500/40 transition-all duration-300 group"
-                            >
-                                <div className="flex flex-col text-right">
-                                    <span className="text-[11px] text-slate-400 font-medium">Kalan Kota</span>
-                                    <span className="text-xs font-bold text-indigo-300 group-hover:text-indigo-200">
-                                        {remainingGb} GB
-                                    </span>
-                                </div>
-                                <div className="w-10 h-2 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-white/5">
-                                    <div 
-                                        className={`h-full rounded-full transition-all duration-500 ${
-                                            quotaPercentage > 85 ? 'bg-rose-500' : 'bg-gradient-to-r from-indigo-500 to-purple-500'
-                                        }`}
-                                        style={{ width: `${quotaPercentage}%` }}
-                                    />
-                                </div>
-                            </Link>
-
                             {/* User Menu Dropdown */}
                             <div className="relative">
                                 <Dropdown>
@@ -254,7 +224,7 @@ export default function AuthenticatedLayout({ header, children }) {
                                     Storage Box Sunucuları
                                 </ResponsiveNavLink>
                                 <ResponsiveNavLink href={route('admin.users.index')} active={isCurrentRoute('admin.users.*')}>
-                                    Kullanıcı & Kota Yönetimi
+                                    Kullanıcı Yönetimi
                                 </ResponsiveNavLink>
                                 <ResponsiveNavLink href={route('admin.jellyfin.index')} active={isCurrentRoute('admin.jellyfin.*')}>
                                     Jellyfin Entegrasyonu
@@ -267,9 +237,6 @@ export default function AuthenticatedLayout({ header, children }) {
                                 <div>
                                     <div className="text-sm font-bold text-white">{user.name}</div>
                                     <div className="text-xs text-slate-400">{user.email}</div>
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-xs text-indigo-400 font-bold">{remainingGb} GB Kalan</span>
                                 </div>
                             </div>
                             <div className="mt-2 space-y-1">

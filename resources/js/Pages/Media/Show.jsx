@@ -10,7 +10,6 @@ export default function MediaShow({
     versionsData = [],
     totalVersionsCount = 1,
     related = [],
-    quota,
 }) {
     const [selectedSeason, setSelectedSeason] = useState(
         seasonsData.length > 0 ? seasonsData[0].season_number : 1

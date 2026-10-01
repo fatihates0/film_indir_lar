@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Media;
 use App\Services\DownloadAuthorizationService;
-use App\Services\QuotaService;
 use App\Services\TmdbService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +16,6 @@ class MediaController extends Controller
 {
     public function __construct(
         protected DownloadAuthorizationService $downloadAuthService,
-        protected QuotaService $quotaService,
     ) {}
 
     public function index(Request $request): Response
@@ -135,9 +133,6 @@ class MediaController extends Controller
             ['path' => $request->url(), 'query' => $request->query()]
         );
 
-        $user = $request->user();
-        $quota = $this->quotaService->ensureCurrentPeriod($user);
-
         // Get unique list of genres available in DB
         $allGenres = Media::whereNotNull('genres')
             ->pluck('genres')
@@ -150,22 +145,11 @@ class MediaController extends Controller
             'media' => $media,
             'allGenres' => $allGenres,
             'filters' => $request->only(['search', 'type', 'genre', 'sort', 'direction']),
-            'quota' => [
-                'limit_bytes' => $quota->quota_limit_bytes,
-                'used_bytes' => $quota->used_bytes,
-                'remaining_bytes' => $quota->remaining_bytes,
-                'limit_gb' => round($quota->quota_limit_bytes / 1073741824, 1),
-                'used_gb' => round($quota->used_bytes / 1073741824, 1),
-                'remaining_gb' => round($quota->remaining_bytes / 1073741824, 1),
-            ],
         ]);
     }
 
     public function show(Media $media, Request $request): Response
     {
-        $user = $request->user();
-        $quota = $this->quotaService->ensureCurrentPeriod($user);
-
         if (empty($media->cast) && $media->tmdb_id) {
             try {
                 app(TmdbService::class)->fetchAndApply($media);
@@ -300,12 +284,6 @@ class MediaController extends Controller
             'versionsData' => $versionsData,
             'totalVersionsCount' => $allGroupItems->count(),
             'related' => $related,
-            'quota' => [
-                'limit_bytes' => $quota->quota_limit_bytes,
-                'used_bytes' => $quota->used_bytes,
-                'remaining_bytes' => $quota->remaining_bytes,
-                'remaining_gb' => round($quota->remaining_bytes / 1073741824, 1),
-            ],
         ]);
     }
 

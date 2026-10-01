@@ -204,12 +204,12 @@ export default function Welcome({ auth }) {
                         <div className="glass-card rounded-3xl p-8 border border-white/5 text-left space-y-4">
                             <div className="w-12 h-12 rounded-2xl bg-cyan-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </div>
-                            <h3 className="font-display font-bold text-xl text-white">Şeffaf Kota Takibi</h3>
+                            <h3 className="font-display font-bold text-xl text-white">Sınırsız İndirme Hızı</h3>
                             <p className="text-slate-400 text-sm leading-relaxed">
-                                30 günlük dönemsel GB kotanızı gerçek zamanlı grafiklerle anlık olarak takip edin. İndirmeleriniz ve izlemeleriniz otomatik düşer.
+                                Herhangi bir kota veya indirme limiti olmadan tüm medya kütüphanesine yüksek hızda kesintisiz erişim sağlayın.
                             </p>
                         </div>
                     </div>

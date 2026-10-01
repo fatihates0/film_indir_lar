@@ -55,7 +55,6 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
     Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
 
     Route::get('/users', [AdminUserController::class, 'index'])->name('users.index');
-    Route::patch('/users/{user}/quota', [AdminUserController::class, 'updateQuota'])->name('users.quota');
     Route::patch('/users/{user}/permissions', [AdminUserController::class, 'updatePermissions'])->name('users.permissions');
 
     Route::get('/media', [MediaAdminController::class, 'index'])->name('media.index');

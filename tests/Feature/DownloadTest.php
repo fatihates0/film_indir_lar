@@ -3,18 +3,15 @@
 use App\Models\Media;
 use App\Models\User;
 use App\Services\DownloadAuthorizationService;
-use App\Services\StorageBoxService;
 
 test('authorized user receives valid signed download link', function () {
     $user = User::factory()->create();
-    $quotaService = app(\App\Services\QuotaService::class);
-    $quotaService->ensureCurrentPeriod($user);
 
     $mountPath = config('storagebox.mount_path', storage_path('app/storagebox'));
     if (! file_exists($mountPath)) {
         mkdir($mountPath, 0755, true);
     }
-    $sampleFile = $mountPath . '/test_film.mkv';
+    $sampleFile = $mountPath.'/test_film.mkv';
     file_put_contents($sampleFile, '0123456789ABCDEF'); // 16 bytes test file
 
     $media = Media::create([

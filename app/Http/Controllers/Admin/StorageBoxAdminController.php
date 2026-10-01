@@ -153,6 +153,16 @@ class StorageBoxAdminController extends Controller
             ->latest()
             ->paginate(10);
 
+        $statusCounts = [
+            'completed' => RemoteTransfer::where('status', 'completed')->count(),
+            'pending' => RemoteTransfer::where('status', 'pending')->count(),
+            'transferring' => RemoteTransfer::where('status', 'transferring')->count(),
+            'failed' => RemoteTransfer::where('status', 'failed')->count(),
+            'cancelled' => RemoteTransfer::where('status', 'cancelled')->count(),
+            'in_progress' => RemoteTransfer::whereIn('status', ['pending', 'transferring'])->count(),
+            'total' => RemoteTransfer::count(),
+        ];
+
         $transfersData = [
             'data' => $paginatedTransfers->getCollection()->map(fn ($t) => [
                 'id' => $t->id,
@@ -180,6 +190,7 @@ class StorageBoxAdminController extends Controller
                 'per_page' => $paginatedTransfers->perPage(),
                 'total' => $paginatedTransfers->total(),
             ],
+            'status_counts' => $statusCounts,
         ];
 
         return Inertia::render('Admin/StorageBoxes/Index', [
@@ -947,6 +958,16 @@ class StorageBoxAdminController extends Controller
             'created_at' => $t->created_at?->diffForHumans(),
         ]);
 
+        $statusCounts = [
+            'completed' => RemoteTransfer::where('status', 'completed')->count(),
+            'pending' => RemoteTransfer::where('status', 'pending')->count(),
+            'transferring' => RemoteTransfer::where('status', 'transferring')->count(),
+            'failed' => RemoteTransfer::where('status', 'failed')->count(),
+            'cancelled' => RemoteTransfer::where('status', 'cancelled')->count(),
+            'in_progress' => RemoteTransfer::whereIn('status', ['pending', 'transferring'])->count(),
+            'total' => RemoteTransfer::count(),
+        ];
+
         return response()->json([
             'transfers' => $transfers,
             'pagination' => [
@@ -955,7 +976,8 @@ class StorageBoxAdminController extends Controller
                 'per_page' => $paginated->perPage(),
                 'total' => $paginated->total(),
             ],
-            'has_active' => RemoteTransfer::whereIn('status', ['pending', 'transferring'])->exists(),
+            'status_counts' => $statusCounts,
+            'has_active' => $statusCounts['in_progress'] > 0,
         ]);
     }
 

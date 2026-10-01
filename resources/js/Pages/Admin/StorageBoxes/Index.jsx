@@ -21,8 +21,18 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
         per_page: 10,
         total: initialTransfers.length,
     };
+    const initialStatusCounts = recent_transfers?.status_counts || {
+        completed: 0,
+        pending: 0,
+        transferring: 0,
+        failed: 0,
+        cancelled: 0,
+        in_progress: 0,
+        total: initialTransfers.length,
+    };
     const [transfers, setTransfers] = useState(initialTransfers);
     const [pagination, setPagination] = useState(initialPagination);
+    const [statusCounts, setStatusCounts] = useState(initialStatusCounts);
     const [currentPage, setCurrentPage] = useState(initialPagination.current_page || 1);
     const [selectedTransferIds, setSelectedTransferIds] = useState([]);
     const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -90,6 +100,9 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
             }
             if (res.data?.pagination) {
                 setPagination(res.data.pagination);
+            }
+            if (res.data?.status_counts) {
+                setStatusCounts(res.data.status_counts);
             }
         }).catch(() => {});
     };
@@ -632,11 +645,30 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                 <div className="rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-800">
                         <div>
-                            <div className="flex items-center gap-2.5 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
                                 <h3 className="text-lg font-bold text-white tracking-tight">Uzaktan Dosya Aktarım Kuyruğu (Remote Transfers)</h3>
-                                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                    {pagination?.total ?? transfers.length} Toplam İşlem
-                                </span>
+                                
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                        ✓ {statusCounts.completed} Tamamlandı
+                                    </span>
+
+                                    {(statusCounts.transferring > 0 || statusCounts.pending > 0) && (
+                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse flex items-center gap-1">
+                                            ⏳ {statusCounts.in_progress} İşlem Bekliyor / Aktarılıyor
+                                        </span>
+                                    )}
+
+                                    {statusCounts.failed > 0 && (
+                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                                            ✕ {statusCounts.failed} Hatalı
+                                        </span>
+                                    )}
+
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                                        Toplam {statusCounts.total ?? pagination?.total ?? transfers.length} İşlem
+                                    </span>
+                                </div>
                             </div>
                             <p className="text-xs text-slate-400 mt-1">Harici linklerden doğrudan Storage Box'a aktarılan dosyaların anlık durumu ve indirme hızları.</p>
                         </div>
