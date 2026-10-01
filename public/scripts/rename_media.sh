@@ -198,11 +198,13 @@ sanitize_title() {
     if command -v php &> /dev/null; then
         php -r '
             $str = $argv[1];
+            $sq = chr(39);
             $map = array(
                 "ç"=>"c", "Ç"=>"C", "ğ"=>"g", "Ğ"=>"G", "ı"=>"i", "İ"=>"I",
                 "ö"=>"o", "Ö"=>"O", "ş"=>"s", "Ş"=>"S", "ü"=>"u", "Ü"=>"U",
                 "â"=>"a", "Â"=>"A", "î"=>"i", "Î"=>"I", "û"=>"u", "Û"=>"U",
-                "é"=>"e", "è"=>"e", "ê"=>"e", "à"=>"a", "á"=>"a", "ñ"=>"n"
+                "é"=>"e", "è"=>"e", "ê"=>"e", "à"=>"a", "á"=>"a", "ñ"=>"n",
+                "’"=>$sq, "‘"=>$sq, "`"=>$sq, "´"=>$sq
             );
             $str = strtr($str, $map);
             if (function_exists("iconv")) {
@@ -211,18 +213,20 @@ sanitize_title() {
                     $str = $conv;
                 }
             }
-            $str = preg_replace("/[^a-zA-Z0-9]+/", ".", $str);
+            $str = preg_replace("/[^a-zA-Z0-9\x27]+/", ".", $str);
+            $str = preg_replace("/\.\.+/", ".", $str);
             echo trim($str, ".");
         ' "$text" 2>/dev/null
     else
         echo "$text" | sed \
+            -e "s/[’‘\`´]/'/g" \
             -e 's/ç/c/g' -e 's/Ç/C/g' \
             -e 's/ğ/g/g' -e 's/Ğ/G/g' \
             -e 's/ı/i/g' -e 's/İ/I/g' \
             -e 's/ö/o/g' -e 's/Ö/O/g' \
             -e 's/ş/s/g' -e 's/Ş/S/g' \
             -e 's/ü/u/g' -e 's/Ü/U/g' \
-            -e 's/[^a-zA-Z0-9]\+/./g' -e 's/^\.//' -e 's/\.$//'
+            -e "s/[^a-zA-Z0-9']\+/./g" -e 's/\.\.\+/./g' -e 's/^\.//' -e 's/\.$//'
     fi
 }
 
@@ -387,6 +391,9 @@ clean_search_title() {
     local filename="$1"
     local base_name="${filename%.*}"
 
+    # Baştaki '---' öneklerini temizle
+    base_name=$(echo "$base_name" | sed -E 's/^-+//')
+
     local year=""
     if echo "$base_name" | grep -qE '\b(19[0-9]{2}|20[0-9]{2})\b'; then
         year=$(echo "$base_name" | grep -oE '\b(19[0-9]{2}|20[0-9]{2})\b' | tail -n1)
@@ -457,19 +464,47 @@ query_tmdb() {
                 $results = $data["results"] ?? array();
             }
 
-            if (!empty($results)) {
-                $first = $results[0];
-                if ($mediaType === "series") {
-                    $tmdbTitle = $first["name"] ?? $first["original_name"] ?? "";
-                    $airDate = $first["first_air_date"] ?? "";
-                    $tmdbYear = !empty($airDate) ? explode("-", $airDate)[0] : "";
-                } else {
-                    $tmdbTitle = $first["title"] ?? $first["original_title"] ?? "";
-                    $relDate = $first["release_date"] ?? "";
-                    $tmdbYear = !empty($relDate) ? explode("-", $relDate)[0] : "";
-                }
-                echo "{$tmdbTitle}|{$tmdbYear}";
+            if (empty($results)) {
+                echo "";
+                exit;
             }
+
+            $first = $results[0];
+            if ($mediaType === "series") {
+                $tmdbTitle = $first["name"] ?? $first["original_name"] ?? "";
+                $airDate = $first["first_air_date"] ?? "";
+                $tmdbYear = !empty($airDate) ? explode("-", $airDate)[0] : "";
+            } else {
+                $tmdbTitle = $first["title"] ?? $first["original_title"] ?? "";
+                $relDate = $first["release_date"] ?? "";
+                $tmdbYear = !empty($relDate) ? explode("-", $relDate)[0] : "";
+            }
+
+            $sq = chr(39);
+            $map = array("’"=>$sq, "‘"=>$sq, "`"=>$sq, "´"=>$sq);
+            $normSearch = preg_replace("/[^a-z0-9]/", "", strtolower(strtr($title, $map)));
+            $normTmdb   = preg_replace("/[^a-z0-9]/", "", strtolower(strtr($tmdbTitle, $map)));
+
+            $isConfident = 0;
+            if ($normSearch === $normTmdb) {
+                $isConfident = 1;
+            } elseif (!empty($normSearch) && !empty($normTmdb) && (strpos($normTmdb, $normSearch) !== false || strpos($normSearch, $normTmdb) !== false)) {
+                $isConfident = 1;
+            } else {
+                similar_text($normSearch, $normTmdb, $percent);
+                if ($percent >= 55.0) {
+                    $isConfident = 1;
+                }
+            }
+
+            if (!empty($year) && !empty($tmdbYear) && $normSearch !== $normTmdb) {
+                $diff = abs((int)$year - (int)$tmdbYear);
+                if ($diff > 3) {
+                    $isConfident = 0;
+                }
+            }
+
+            echo "{$tmdbTitle}|{$tmdbYear}|{$isConfident}";
         ' "$title" "$year" "$media_type" "$TMDB_API_KEY" 2>/dev/null
     fi
 }
@@ -504,13 +539,39 @@ compute_new_filename() {
     local tmdb_result=$(query_tmdb "$parsed_title" "$parsed_year" "$media_type")
     local tmdb_title=""
     local tmdb_year=""
+    local tmdb_status="0"
 
     if [ -n "$tmdb_result" ]; then
         tmdb_title=$(echo "$tmdb_result" | cut -d'|' -f1)
         tmdb_year=$(echo "$tmdb_result" | cut -d'|' -f2)
-        echo -e "${GREEN}BAŞARILI [TMDB: $tmdb_title (${tmdb_year:-N/A})]${NC}" >&2
+        tmdb_status=$(echo "$tmdb_result" | cut -d'|' -f3)
+    fi
+
+    local is_uncertain=false
+    if [ -z "$tmdb_result" ] || [ "$tmdb_status" = "0" ]; then
+        is_uncertain=true
+    fi
+
+    if [ "$is_uncertain" = true ]; then
+        if [ -n "$tmdb_title" ]; then
+            echo -e "${YELLOW}EMİN OLUNAMADI [TMDB: $tmdb_title (${tmdb_year:-N/A})] (Dosya ismine '---' eklenecek)${NC}" >&2
+        else
+            echo -e "${YELLOW}BULUNAMADI (TMDB kaydı bulunamadı, dosya ismine '---' eklenecek)${NC}" >&2
+        fi
+
+        if [[ "$file_name" == ---* ]]; then
+            echo -e "${YELLOW}--> Dosya zaten '---' önekiyle işaretlenmiş, değişiklik yapılmadı.${NC}" >&2
+            echo "" >&2
+            return
+        else
+            local uncert_name="---${file_name}"
+            echo -e "   - Durum      : ${YELLOW}Emin olunamadı (İsim değiştirilmedi, önek eklendi)${NC}" >&2
+            echo -e "   - Yeni İsim  : ${YELLOW}${uncert_name}${NC}" >&2
+            echo "$uncert_name"
+            return
+        fi
     else
-        echo -e "${YELLOW}BULUNAMADI (Yerel isim kullanılacak)${NC}" >&2
+        echo -e "${GREEN}BAŞARILI [TMDB: $tmdb_title (${tmdb_year:-N/A})]${NC}" >&2
     fi
 
     local final_title_raw="${tmdb_title:-$parsed_title}"
@@ -519,7 +580,7 @@ compute_new_filename() {
 
     if [ -z "$sanitized_title" ]; then
         echo -e "${RED}Uyarı: Başlık ayrıştırılamadı, atlanıyor.${NC}" >&2
-        echo ""
+        echo "" >&2
         return
     fi
 
@@ -563,7 +624,7 @@ compute_new_filename() {
 
     if [ "$file_name" = "$new_name" ]; then
         echo -e "${YELLOW}--> Dosya ismi zaten standart biçimde, değişiklik yapılmadı.${NC}" >&2
-        echo ""
+        echo "" >&2
         return
     fi
 
