@@ -22,11 +22,24 @@ class MediaController extends Controller
     {
         $query = Media::where('is_active', true)->where('is_available', true);
 
-        if ($search = $request->input('search')) {
-            $query->where(function ($q) use ($search) {
+        if ($search = trim($request->input('search') ?? '')) {
+            $dotSearch = str_replace(' ', '.', $search);
+            $underscoreSearch = str_replace(' ', '_', $search);
+            $dashSearch = str_replace(' ', '-', $search);
+
+            $query->where(function ($q) use ($search, $dotSearch, $underscoreSearch, $dashSearch) {
                 $q->where('title', 'like', "%{$search}%")
                     ->orWhere('original_title', 'like', "%{$search}%")
-                    ->orWhere('overview', 'like', "%{$search}%");
+                    ->orWhere('imdb_id', 'like', "%{$search}%")
+                    ->orWhere('overview', 'like', "%{$search}%")
+                    ->orWhere('file_name', 'like', "%{$search}%")
+                    ->orWhere('file_name', 'like', "%{$dotSearch}%")
+                    ->orWhere('file_name', 'like', "%{$underscoreSearch}%")
+                    ->orWhere('file_name', 'like', "%{$dashSearch}%");
+
+                if (is_numeric($search)) {
+                    $q->orWhere('tmdb_id', (int) $search);
+                }
             });
         }
 
@@ -43,6 +56,27 @@ class MediaController extends Controller
         }
 
         $allMatching = $query->get();
+
+        if ($request->filled('search') && $allMatching->isNotEmpty()) {
+            $matchedTmdbIds = $allMatching->pluck('tmdb_id')->filter()->unique()->toArray();
+            $matchedSlugs = $allMatching->map(fn ($m) => Str::slug($m->title))->filter()->unique()->toArray();
+
+            $siblingMedia = Media::where('is_active', true)
+                ->where('is_available', true)
+                ->where(function ($q) use ($matchedTmdbIds, $matchedSlugs) {
+                    if (! empty($matchedTmdbIds)) {
+                        $q->whereIn('tmdb_id', $matchedTmdbIds);
+                    }
+                    if (! empty($matchedSlugs)) {
+                        foreach ($matchedSlugs as $slug) {
+                            $q->orWhere('title', 'like', '%'.str_replace('-', '%', $slug).'%');
+                        }
+                    }
+                })
+                ->get();
+
+            $allMatching = $allMatching->merge($siblingMedia)->unique('id');
+        }
 
         // Group media items by TMDB ID or clean title slug
         $grouped = $allMatching->groupBy(function ($item) {

@@ -269,7 +269,7 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
                                 type="text"
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
-                                placeholder="Film veya dizi adı ile arayın..."
+                                placeholder="Film/dizi adı, IMDb ID (tt...) veya TMDB ID ile arayın..."
                                 className="w-full pl-10 pr-4 py-2.5 rounded-xl glass-input text-xs sm:text-sm text-white placeholder-slate-400"
                             />
                         </div>

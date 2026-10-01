@@ -58,6 +58,7 @@ class Media extends Model
         'season_number',
         'episode_number',
         'quality_label',
+        'tmdb_match_status',
     ];
 
     protected function casts(): array
@@ -155,6 +156,81 @@ class Media extends Model
         }
 
         return 'HD';
+    }
+
+    public function getTmdbMatchStatusAttribute(): array
+    {
+        if (! $this->tmdb_id) {
+            return [
+                'status' => 'missing',
+                'label' => 'TMDB Eksik',
+                'color' => 'amber',
+                'issues' => ['TMDB bilgisi çekilmemiş'],
+            ];
+        }
+
+        $issues = [];
+
+        // 1. Afiş (Poster) Eksikliği Kontrolü
+        if (empty($this->poster_path)) {
+            $issues[] = 'Afiş Yok';
+        }
+
+        // 2. Başlık Uyuşmazlığı Kontrolü (Türkçe karakter ve temizlik normalizasyonu)
+        $trMap = ['ç' => 'c', 'Ç' => 'c', 'ğ' => 'g', 'Ğ' => 'g', 'ı' => 'i', 'I' => 'i', 'İ' => 'i', 'ö' => 'o', 'Ö' => 'o', 'ş' => 's', 'Ş' => 's', 'ü' => 'u', 'Ü' => 'u'];
+
+        $normFile = strtr($this->file_name ?? '', $trMap);
+        $normFile = strtolower(pathinfo($normFile, PATHINFO_FILENAME));
+        $normFile = preg_replace('/(m1080p|1080p|m720p|720p|2160p|4k|bluray|web-dl|webrip|dual|x264|x265|ac3|rarbg|divxup|uhdfilmindir|film|dizi|sansursuz|yerli|german|korean|yts|mx|vxt|s\d+e\d+|\d+x\d+)/i', '', $normFile);
+        $normFile = trim(preg_replace('/[^a-z0-9]+/', ' ', $normFile));
+        $normFileNoYear = trim(preg_replace('/\b(19\d{2}|20\d{2})\b/', '', $normFile));
+
+        $normTitle = trim(preg_replace('/[^a-z0-9]+/', ' ', strtolower(strtr($this->title ?? '', $trMap))));
+        $normOriginal = trim(preg_replace('/[^a-z0-9]+/', ' ', strtolower(strtr($this->original_title ?? '', $trMap))));
+        $normTitleNoYear = trim(preg_replace('/\b(19\d{2}|20\d{2})\b/', '', $normTitle));
+        $normOriginalNoYear = trim(preg_replace('/\b(19\d{2}|20\d{2})\b/', '', $normOriginal));
+
+        similar_text($normFileNoYear, $normTitleNoYear, $sim1);
+        similar_text($normFileNoYear, $normOriginalNoYear, $sim2);
+        $bestSim = max($sim1, $sim2);
+
+        $fileWords = array_filter(explode(' ', $normFileNoYear), fn ($w) => strlen($w) >= 3);
+        $matchedWordsCount = 0;
+        foreach ($fileWords as $word) {
+            if (str_contains($normTitleNoYear, $word) || str_contains($normOriginalNoYear, $word)) {
+                $matchedWordsCount++;
+            }
+        }
+
+        $hasWordOverlap = count($fileWords) === 0 || ($matchedWordsCount / count($fileWords)) >= 0.4;
+
+        if ($bestSim < 40 && ! $hasWordOverlap) {
+            $issues[] = 'Başlık Uyuşmazlığı';
+        }
+
+        // 3. Yıl Uyuşmazlığı Kontrolü
+        if ($this->year && preg_match('/\b(19\d{2}|20\d{2})\b/', $this->file_name ?? '', $ym)) {
+            $fileYear = (int) $ym[1];
+            if (abs($fileYear - $this->year) > 2) {
+                $issues[] = "Yıl Uyuşmazlığı ({$fileYear} vs {$this->year})";
+            }
+        }
+
+        if (! empty($issues)) {
+            return [
+                'status' => 'suspicious',
+                'label' => 'Hatalı / Şüpheli Eşleşme',
+                'color' => 'rose',
+                'issues' => $issues,
+            ];
+        }
+
+        return [
+            'status' => 'ok',
+            'label' => 'Eşleşti',
+            'color' => 'emerald',
+            'issues' => [],
+        ];
     }
 
     public static function generateUniqueSlug(string $title, ?int $year = null, ?int $ignoreId = null): string

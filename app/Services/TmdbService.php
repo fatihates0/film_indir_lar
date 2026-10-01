@@ -146,6 +146,104 @@ class TmdbService
     }
 
     /**
+     * Search TMDB by text query, TMDB ID, or IMDb ID.
+     */
+    public function searchByQueryOrId(string $query, string $type = 'multi', ?int $year = null): array
+    {
+        $query = trim($query);
+        if (empty($query)) {
+            return [];
+        }
+
+        // 1. IMDb ID Search (e.g. tt1234567)
+        if (preg_match('/^tt\d+$/i', $query)) {
+            try {
+                $response = Http::withOptions(['verify' => false])
+                    ->timeout(10)
+                    ->get("{$this->baseUrl}/find/{$query}", [
+                        'api_key' => $this->apiKey,
+                        'external_source' => 'imdb_id',
+                        'language' => 'tr-TR',
+                    ]);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    $rawResults = array_merge(
+                        array_map(fn ($i) => array_merge($i, ['media_type' => 'movie']), $data['movie_results'] ?? []),
+                        array_map(fn ($i) => array_merge($i, ['media_type' => 'tv']), $data['tv_results'] ?? [])
+                    );
+
+                    if (! empty($rawResults)) {
+                        return array_map([$this, 'formatSearchResult'], $rawResults);
+                    }
+                }
+            } catch (Exception $e) {
+                Log::error('TMDB find by IMDb ID exception: '.$e->getMessage());
+            }
+        }
+
+        // 2. Numeric TMDB ID direct lookup
+        if (is_numeric($query)) {
+            $tmdbId = (int) $query;
+            $results = [];
+
+            $movie = $this->getMovieDetails($tmdbId);
+            if ($movie && isset($movie['id'])) {
+                $movie['media_type'] = 'movie';
+                $results[] = $this->formatSearchResult($movie);
+            }
+
+            $tv = $this->getTvDetails($tmdbId);
+            if ($tv && isset($tv['id'])) {
+                $tv['media_type'] = 'tv';
+                $results[] = $this->formatSearchResult($tv);
+            }
+
+            if (! empty($results)) {
+                return $results;
+            }
+        }
+
+        // 3. Text search
+        $raw = $this->search($query, $type, $year);
+
+        return array_map([$this, 'formatSearchResult'], $raw);
+    }
+
+    /**
+     * Format search result item for uniform frontend consumption.
+     */
+    public function formatSearchResult(array $item): array
+    {
+        $mediaType = $item['media_type'] ?? (isset($item['title']) ? 'movie' : 'tv');
+        $title = $item['title'] ?? $item['name'] ?? '';
+        $originalTitle = $item['original_title'] ?? $item['original_name'] ?? '';
+        $releaseDate = $item['release_date'] ?? $item['first_air_date'] ?? null;
+        $year = $releaseDate ? (int) substr($releaseDate, 0, 4) : null;
+        $posterPath = $item['poster_path'] ?? null;
+        $posterUrl = $posterPath ? 'https://image.tmdb.org/t/p/w185/'.ltrim($posterPath, '/') : null;
+        $backdropPath = $item['backdrop_path'] ?? null;
+        $backdropUrl = $backdropPath ? 'https://image.tmdb.org/t/p/w780/'.ltrim($backdropPath, '/') : null;
+
+        return [
+            'id' => $item['id'] ?? null,
+            'title' => $title,
+            'original_title' => $originalTitle,
+            'media_type' => $mediaType,
+            'release_date' => $releaseDate,
+            'year' => $year,
+            'poster_path' => $posterPath,
+            'poster_url' => $posterUrl,
+            'backdrop_path' => $backdropPath,
+            'backdrop_url' => $backdropUrl,
+            'overview' => $item['overview'] ?? '',
+            'vote_average' => isset($item['vote_average']) ? (float) $item['vote_average'] : null,
+            'vote_count' => isset($item['vote_count']) ? (int) $item['vote_count'] : null,
+            'imdb_id' => $item['external_ids']['imdb_id'] ?? $item['imdb_id'] ?? null,
+        ];
+    }
+
+    /**
      * Get details for a Movie.
      */
     public function getMovieDetails(int|string $tmdbId, string $language = 'tr-TR'): ?array
@@ -321,8 +419,17 @@ class TmdbService
 
         $isMovie = isset($details['title']);
 
-        $title = $details['title'] ?? $details['name'] ?? $media->title;
         $originalTitle = $details['original_title'] ?? $details['original_name'] ?? null;
+
+        $enTitle = null;
+        if (! empty($details['id'])) {
+            $enDetails = $isMovie
+                ? $this->getMovieDetails($details['id'], 'en-US')
+                : $this->getTvDetails($details['id'], 'en-US');
+            $enTitle = $enDetails['title'] ?? $enDetails['name'] ?? null;
+        }
+
+        $title = $enTitle ?: ($originalTitle ?: ($details['title'] ?? $details['name'] ?? $media->title));
         $releaseDate = $details['release_date'] ?? $details['first_air_date'] ?? null;
         $year = $releaseDate ? (int) substr($releaseDate, 0, 4) : $media->year;
 

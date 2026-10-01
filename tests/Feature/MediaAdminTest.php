@@ -197,3 +197,18 @@ test('admin can generate bulk download links for selected media items', function
     expect($links[1]['title'])->toBe('Bulk Link Movie 2');
     expect($links[1]['download_url'])->toContain('/download/stream/');
 });
+
+test('admin can fetch scan targets and trigger progressive target scan', function () {
+    $admin = User::factory()->create(['role' => UserRole::ADMIN]);
+
+    $responseTargets = $this->actingAs($admin)->getJson('/admin/media/scan-targets');
+    $responseTargets->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $responseScan = $this->actingAs($admin)->postJson('/admin/media/scan-target', [
+        'id' => null,
+        'sub_directory' => '',
+    ]);
+    $responseScan->assertOk()
+        ->assertJsonPath('status', 'success');
+});

@@ -1,0 +1,1 @@
+php "$PSScriptRoot\artisan" @args

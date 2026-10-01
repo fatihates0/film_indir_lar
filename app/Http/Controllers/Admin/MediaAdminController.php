@@ -34,15 +34,68 @@ class MediaAdminController extends Controller
         $query = Media::with('storageBox')->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
+            $search = trim($request->search);
+            $dotSearch = str_replace(' ', '.', $search);
+            $underscoreSearch = str_replace(' ', '_', $search);
+            $dashSearch = str_replace(' ', '-', $search);
+
+            $query->where(function ($q) use ($search, $dotSearch, $underscoreSearch, $dashSearch) {
                 $q->where('title', 'like', '%'.$search.'%')
                     ->orWhere('original_title', 'like', '%'.$search.'%')
-                    ->orWhere('file_name', 'like', '%'.$search.'%');
+                    ->orWhere('imdb_id', 'like', '%'.$search.'%')
+                    ->orWhere('file_name', 'like', '%'.$search.'%')
+                    ->orWhere('file_name', 'like', '%'.$dotSearch.'%')
+                    ->orWhere('file_name', 'like', '%'.$underscoreSearch.'%')
+                    ->orWhere('file_name', 'like', '%'.$dashSearch.'%')
+                    ->orWhere('file_path', 'like', '%'.$search.'%')
+                    ->orWhere('file_path', 'like', '%'.$dotSearch.'%')
+                    ->orWhere('file_path', 'like', '%'.$underscoreSearch.'%')
+                    ->orWhere('file_path', 'like', '%'.$dashSearch.'%');
+
+                if (is_numeric($search)) {
+                    $q->orWhere('tmdb_id', (int) $search);
+                }
             });
         }
 
+        if ($request->filled('tmdb_filter')) {
+            $tmdbFilter = $request->tmdb_filter;
+            if ($tmdbFilter === 'missing') {
+                $query->where(function ($q) {
+                    $q->whereNull('tmdb_id')->orWhere('tmdb_id', 0);
+                });
+            } elseif ($tmdbFilter === 'synced') {
+                $query->whereNotNull('tmdb_id')->where('tmdb_id', '>', 0);
+            }
+        }
+
         $allMatching = $query->get();
+
+        if ($request->filled('search') && $allMatching->isNotEmpty()) {
+            $matchedTmdbIds = $allMatching->pluck('tmdb_id')->filter()->unique()->toArray();
+            $matchedSlugs = $allMatching->map(fn ($m) => Str::slug($m->title))->filter()->unique()->toArray();
+
+            $siblingMedia = Media::with('storageBox')
+                ->where(function ($q) use ($matchedTmdbIds, $matchedSlugs) {
+                    if (! empty($matchedTmdbIds)) {
+                        $q->whereIn('tmdb_id', $matchedTmdbIds);
+                    }
+                    if (! empty($matchedSlugs)) {
+                        foreach ($matchedSlugs as $slug) {
+                            $q->orWhere('title', 'like', '%'.str_replace('-', '%', $slug).'%');
+                        }
+                    }
+                })
+                ->get();
+
+            $allMatching = $allMatching->merge($siblingMedia)->unique('id');
+        }
+
+        if ($request->filled('tmdb_filter') && $request->tmdb_filter === 'suspicious') {
+            $allMatching = $allMatching->filter(function ($item) {
+                return $item->tmdb_match_status['status'] === 'suspicious';
+            });
+        }
 
         // Group media items by TMDB ID or title slug
         $grouped = $allMatching->groupBy(function ($item) {
@@ -207,10 +260,16 @@ class MediaAdminController extends Controller
                 ];
             });
 
+        $allMedia = Media::all();
+        $unsyncedCount = $allMedia->whereNull('tmdb_id')->count() + $allMedia->where('tmdb_id', 0)->count();
+        $suspiciousCount = $allMedia->filter(fn ($m) => $m->tmdb_match_status['status'] === 'suspicious')->count();
+
         return Inertia::render('Admin/Media/Index', [
             'media' => $media,
             'storageBoxes' => $storageBoxes,
-            'filters' => $request->only(['search', 'per_page']),
+            'unsyncedCount' => $unsyncedCount,
+            'suspiciousCount' => $suspiciousCount,
+            'filters' => $request->only(['search', 'per_page', 'tmdb_filter']),
         ]);
     }
 
@@ -350,13 +409,13 @@ class MediaAdminController extends Controller
     public function searchTmdb(Request $request): JsonResponse
     {
         $request->validate([
-            'query' => ['required', 'string', 'min:2'],
+            'query' => ['required', 'string', 'min:1'],
             'type' => ['nullable', 'string', 'in:movie,series,episode,multi'],
             'year' => ['nullable', 'integer'],
         ]);
 
         $type = $request->query('type', 'multi');
-        $results = $this->tmdbService->search($request->input('query'), $type, $request->input('year'));
+        $results = $this->tmdbService->searchByQueryOrId($request->input('query'), $type, $request->input('year'));
 
         return response()->json([
             'status' => 'success',
@@ -364,10 +423,42 @@ class MediaAdminController extends Controller
         ]);
     }
 
-    public function syncTmdb(Request $request, Media $media): RedirectResponse
+    public function syncTmdb(Request $request, Media $media): JsonResponse|RedirectResponse
     {
         $tmdbId = $request->input('tmdb_id');
-        $success = $this->tmdbService->fetchAndApply($media, $tmdbId ? (int) $tmdbId : null);
+        $targetTmdbId = $tmdbId ? (int) $tmdbId : null;
+
+        $groupItems = collect([$media]);
+        if ($media->tmdb_id) {
+            $groupItems = Media::where('tmdb_id', $media->tmdb_id)->get();
+        } else {
+            $targetSlug = Str::slug($media->title);
+            $groupItems = Media::all()->filter(function ($item) use ($targetSlug) {
+                return Str::slug($item->title) === $targetSlug;
+            });
+        }
+
+        if ($groupItems->isEmpty()) {
+            $groupItems = collect([$media]);
+        }
+
+        $successCount = 0;
+        foreach ($groupItems as $item) {
+            if ($this->tmdbService->fetchAndApply($item, $targetTmdbId)) {
+                $successCount++;
+            }
+        }
+
+        $success = $successCount > 0;
+
+        if ($request->wantsJson() || $request->expectsJson()) {
+            return response()->json([
+                'success' => $success,
+                'message' => $success
+                    ? sprintf('"%s" TMDB bilgileri güncellendi.', $media->title)
+                    : sprintf('"%s" için TMDB bilgisi bulunamadı.', $media->title),
+            ]);
+        }
 
         if ($success) {
             return back()->with('message', sprintf('"%s" TMDB bilgileri güncellendi.', $media->title));
@@ -535,6 +626,88 @@ class MediaAdminController extends Controller
             $result['updated'],
             $result['missing']
         ));
+    }
+
+    public function scanTargets(): JsonResponse
+    {
+        $this->scannerService->discoverAndSyncMounts();
+        $boxes = StorageBox::where('is_active', true)->get();
+
+        $targets = [];
+
+        if ($boxes->isEmpty()) {
+            $targets[] = [
+                'id' => null,
+                'name' => 'Varsayılan Yerel Depolama (storage_path)',
+                'sub_directory' => '',
+            ];
+        } else {
+            foreach ($boxes as $box) {
+                $mountPath = $box->mount_path;
+                $subDirsFound = [];
+
+                if ($mountPath && file_exists($mountPath) && is_dir($mountPath)) {
+                    $items = @scandir($mountPath);
+                    if (is_array($items)) {
+                        foreach ($items as $item) {
+                            if ($item === '.' || $item === '..') {
+                                continue;
+                            }
+                            $full = str_replace('\\', '/', rtrim($mountPath, '/').'/'.$item);
+                            if (is_dir($full) && ! Str::startsWith($item, ['.', '$', 'sample', 'Sample'])) {
+                                $subDirsFound[] = $item;
+                            }
+                        }
+                    }
+                }
+
+                if (count($subDirsFound) > 1) {
+                    foreach ($subDirsFound as $subDir) {
+                        $targets[] = [
+                            'id' => $box->id,
+                            'name' => "{$box->name} ({$subDir})",
+                            'sub_directory' => $subDir,
+                        ];
+                    }
+                } else {
+                    $targets[] = [
+                        'id' => $box->id,
+                        'name' => $box->name,
+                        'sub_directory' => '',
+                    ];
+                }
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'targets' => $targets,
+        ]);
+    }
+
+    public function scanTarget(Request $request): JsonResponse
+    {
+        $boxId = $request->input('id');
+        $subDir = (string) $request->input('sub_directory', '');
+
+        $box = $boxId ? StorageBox::find($boxId) : null;
+        $result = $this->scannerService->scan($box, $subDir);
+
+        $this->auditLogService->log(
+            action: 'media_scan_target',
+            targetType: 'Media',
+            newValues: array_merge(['storage_box_id' => $boxId, 'sub_directory' => $subDir], $result)
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'box_id' => $boxId,
+            'name' => $box ? $box->name : 'Varsayılan Depolama',
+            'added' => $result['added'] ?? 0,
+            'updated' => $result['updated'] ?? 0,
+            'missing' => $result['missing'] ?? 0,
+            'total_scanned' => $result['total_scanned'] ?? 0,
+        ]);
     }
 
     public function toggleActive(Media $media): RedirectResponse

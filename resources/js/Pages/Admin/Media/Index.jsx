@@ -3,11 +3,12 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Fragment, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-export default function MediaAdminIndex({ media, storageBoxes = [], filters = {} }) {
+export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCount = 0, suspiciousCount = 0, filters = {} }) {
     const flash = usePage().props.flash;
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
     const [perPage, setPerPage] = useState(filters.per_page || '10');
+    const [tmdbFilter, setTmdbFilter] = useState(filters.tmdb_filter || 'all');
     const [expandedGroups, setExpandedGroups] = useState({});
 
     const toggleGroupExpand = (id) => {
@@ -19,13 +20,30 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
 
     const handleSearchSubmit = (e) => {
         e.preventDefault();
-        router.get(route('admin.media.index'), { search: searchQuery, per_page: perPage }, { preserveState: true, replace: true });
+        router.get(route('admin.media.index'), {
+            search: searchQuery || undefined,
+            per_page: perPage !== '10' ? perPage : undefined,
+            tmdb_filter: tmdbFilter !== 'all' ? tmdbFilter : undefined,
+        }, { preserveState: true, replace: true });
     };
 
     const handlePerPageChange = (e) => {
         const val = e.target.value;
         setPerPage(val);
-        router.get(route('admin.media.index'), { search: searchQuery, per_page: val }, { preserveState: true, replace: true });
+        router.get(route('admin.media.index'), {
+            search: searchQuery || undefined,
+            per_page: val !== '10' ? val : undefined,
+            tmdb_filter: tmdbFilter !== 'all' ? tmdbFilter : undefined,
+        }, { preserveState: true, replace: true });
+    };
+
+    const handleTmdbFilterChange = (val) => {
+        setTmdbFilter(val);
+        router.get(route('admin.media.index'), {
+            search: searchQuery || undefined,
+            per_page: perPage !== '10' ? perPage : undefined,
+            tmdb_filter: val !== 'all' ? val : undefined,
+        }, { preserveState: true, replace: true });
     };
 
     // Modal & Picker state
@@ -71,6 +89,21 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
     });
     const syncCancelledRef = useRef(false);
 
+    // Media Scan Progress Bar Overlay State
+    const [scanProgress, setScanProgress] = useState({
+        active: false,
+        completed: false,
+        current: 0,
+        total: 0,
+        percent: 0,
+        currentTitle: '',
+        addedCount: 0,
+        updatedCount: 0,
+        missingCount: 0,
+        scannedTotal: 0,
+    });
+    const scanCancelledRef = useRef(false);
+
     const [selectedIds, setSelectedIds] = useState([]);
     const [selectionMode, setSelectionMode] = useState(false);
     const [deletingBulk, setDeletingBulk] = useState(false);
@@ -81,6 +114,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
     const [fetchingLinks, setFetchingLinks] = useState(false);
     const [copiedMap, setCopiedMap] = useState({});
     const [linksFilter, setLinksFilter] = useState('');
+
+    // Single Item TMDB Modal State
+    const [singleTmdbModalOpen, setSingleTmdbModalOpen] = useState(false);
+    const [editingMedia, setEditingMedia] = useState(null);
+    const [singleTmdbQuery, setSingleTmdbQuery] = useState('');
+    const [singleTmdbResults, setSingleTmdbResults] = useState([]);
+    const [searchingSingleTmdb, setSearchingSingleTmdb] = useState(false);
+    const [updatingSingleTmdbId, setUpdatingSingleTmdbId] = useState(null);
 
     const generateDownloadLinks = (targetIds = null) => {
         const idsToFetch = targetIds ? (Array.isArray(targetIds) ? targetIds : [targetIds]) : selectedIds;
@@ -280,6 +321,12 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
 
         if (filterType === 'all') {
             targetIds = getAllPageVersionIds();
+        } else if (filterType === 'suspicious_tmdb') {
+            media.data.forEach((m) => {
+                if (m.tmdb_match_status?.status === 'suspicious') {
+                    targetIds.push(...getGroupVersionIds(m));
+                }
+            });
         } else if (filterType === 'missing_tmdb') {
             media.data.forEach((m) => {
                 if (!m.tmdb_id) {
@@ -458,6 +505,78 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
         });
     };
 
+    const openSingleTmdbModal = (mediaItem) => {
+        setEditingMedia(mediaItem);
+        setSingleTmdbModalOpen(true);
+        setSingleTmdbResults([]);
+
+        const initialQuery = mediaItem.tmdb_id
+            ? String(mediaItem.tmdb_id)
+            : (mediaItem.original_title || mediaItem.title || mediaItem.file_name || '');
+        setSingleTmdbQuery(initialQuery);
+
+        if (initialQuery) {
+            executeSingleTmdbSearch(initialQuery, mediaItem.type);
+        }
+    };
+
+    const closeSingleTmdbModal = () => {
+        setSingleTmdbModalOpen(false);
+        setEditingMedia(null);
+        setSingleTmdbQuery('');
+        setSingleTmdbResults([]);
+        setSearchingSingleTmdb(false);
+        setUpdatingSingleTmdbId(null);
+    };
+
+    const executeSingleTmdbSearch = (queryStr, mediaType = 'multi') => {
+        if (!queryStr || queryStr.trim().length === 0) return;
+        setSearchingSingleTmdb(true);
+        fetch(route('admin.media.tmdb-search') + `?query=${encodeURIComponent(queryStr.trim())}&type=${mediaType || 'multi'}`)
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.status === 'success') {
+                    setSingleTmdbResults(data.results || []);
+                }
+            })
+            .catch((err) => console.error(err))
+            .finally(() => setSearchingSingleTmdb(false));
+    };
+
+    const handleSingleTmdbSearchSubmit = (e) => {
+        e.preventDefault();
+        executeSingleTmdbSearch(singleTmdbQuery, editingMedia?.type || 'multi');
+    };
+
+    const applySingleTmdbSelection = (candidate) => {
+        if (!editingMedia || !candidate?.id) return;
+        setUpdatingSingleTmdbId(candidate.id);
+
+        fetch(route('admin.media.tmdb-sync', editingMedia.id), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+            body: JSON.stringify({ tmdb_id: candidate.id }),
+        })
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.success) {
+                    closeSingleTmdbModal();
+                    router.reload({ preserveScroll: true });
+                } else {
+                    alert(data.message || 'TMDB verisi uygulanamadı.');
+                }
+            })
+            .catch((err) => {
+                console.error(err);
+                alert('TMDB verisi güncellenirken bir hata oluştu.');
+            })
+            .finally(() => setUpdatingSingleTmdbId(null));
+    };
+
     const syncTmdbSingle = (id) => {
         setSyncingId(id);
         router.post(route('admin.media.tmdb-sync', id), {}, {
@@ -470,21 +589,9 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
 
         setSyncingAll(true);
         try {
-            const res = await fetch(route('admin.media.unsynced-tmdb'));
-            const data = await res.json();
-
-            let itemsToSync = data.items || [];
-
-            if (itemsToSync.length === 0) {
-                if (confirm('Tüm içeriklerin TMDB bilgileri zaten çekilmiş durumda.\n\nYine de TÜM kütüphane içeriklerini yeniden taramak ve güncellemek ister misiniz?')) {
-                    const allRes = await fetch(route('admin.media.all-tmdb-ids'));
-                    const allData = await allRes.json();
-                    itemsToSync = allData.items || [];
-                } else {
-                    setSyncingAll(false);
-                    return;
-                }
-            }
+            const allRes = await fetch(route('admin.media.all-tmdb-ids'));
+            const allData = await allRes.json();
+            const itemsToSync = allData.items || [];
 
             if (itemsToSync.length === 0) {
                 alert('Taranacak medya bulunamadı.');
@@ -588,11 +695,105 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
         }
     };
 
-    const triggerScan = () => {
+    const triggerScan = async () => {
+        if (scanProgress.active && !scanProgress.completed) return;
+
         setScanning(true);
-        router.post(route('admin.media.scan'), {}, {
-            onFinish: () => setScanning(false),
-        });
+        try {
+            const res = await fetch(route('admin.media.scan-targets'));
+            const data = await res.json();
+            const targets = data.targets || [];
+
+            if (targets.length === 0) {
+                alert('Taranacak Storage Box bulunamadı.');
+                setScanning(false);
+                return;
+            }
+
+            scanCancelledRef.current = false;
+            setScanProgress({
+                active: true,
+                completed: false,
+                current: 0,
+                total: targets.length,
+                percent: 0,
+                currentTitle: targets[0]?.name || '',
+                addedCount: 0,
+                updatedCount: 0,
+                missingCount: 0,
+                scannedTotal: 0,
+            });
+
+            let addedSum = 0;
+            let updatedSum = 0;
+            let missingSum = 0;
+            let scannedSum = 0;
+
+            for (let i = 0; i < targets.length; i++) {
+                if (scanCancelledRef.current) break;
+
+                const target = targets[i];
+                const currentNum = i + 1;
+                const pct = Math.round((currentNum / targets.length) * 100);
+
+                setScanProgress((prev) => ({
+                    ...prev,
+                    current: currentNum,
+                    percent: pct,
+                    currentTitle: target.name,
+                }));
+
+                try {
+                    const response = await fetch(route('admin.media.scan-target'), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                        },
+                        body: JSON.stringify(target),
+                    });
+                    const result = await response.json();
+                    if (result.status === 'success') {
+                        addedSum += result.added || 0;
+                        updatedSum += result.updated || 0;
+                        missingSum += result.missing || 0;
+                        scannedSum += result.total_scanned || 0;
+                    }
+                } catch (err) {
+                    console.error(err);
+                }
+
+                setScanProgress((prev) => ({
+                    ...prev,
+                    addedCount: addedSum,
+                    updatedCount: updatedSum,
+                    missingCount: missingSum,
+                    scannedTotal: scannedSum,
+                }));
+            }
+
+            setScanProgress((prev) => ({
+                ...prev,
+                completed: true,
+                currentTitle: scanCancelledRef.current ? 'Tarama İptal Edildi' : 'Tüm Taramalar Tamamlandı!',
+            }));
+
+            router.reload({ preserveScroll: true });
+        } catch (err) {
+            console.error(err);
+            alert('Tarama işlemi başlatılırken bir hata oluştu.');
+        } finally {
+            setScanning(false);
+        }
+    };
+
+    const cancelScan = () => {
+        scanCancelledRef.current = true;
+    };
+
+    const closeScanProgress = () => {
+        setScanProgress((prev) => ({ ...prev, active: false }));
     };
 
     return (
@@ -688,7 +889,19 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                 <div className="rounded-3xl bg-[#0f1422] border border-slate-800 overflow-hidden shadow-2xl">
                     <div className="p-6 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
-                            <h3 className="text-base font-bold text-white">Kütüphanedeki Tüm Medyalar</h3>
+                            <div className="flex items-center gap-2.5">
+                                <h3 className="text-base font-bold text-white">Kütüphanedeki Tüm Medyalar</h3>
+                                {tmdbFilter === 'suspicious' && (
+                                    <span className="bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[11px] font-semibold px-2 py-0.5 rounded-lg flex items-center gap-1 animate-fadeIn">
+                                        <span>⚠️ Hatalı/Şüpheli Eşleşmeler Filtrelendi</span>
+                                    </span>
+                                )}
+                                {tmdbFilter === 'missing' && (
+                                    <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-semibold px-2 py-0.5 rounded-lg flex items-center gap-1 animate-fadeIn">
+                                        <span>⚠️ TMDB Eksik Olanlar Filtrelendi</span>
+                                    </span>
+                                )}
+                            </div>
                             <p className="text-xs text-slate-400 mt-0.5">
                                 {media.from && media.to
                                     ? `${media.from} - ${media.to} arası gösteriliyor (${media.total} toplam içerik)`
@@ -696,10 +909,36 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
+                            {/* TMDB Filtre Seçeneği */}
+                            <div className="relative">
+                                <select
+                                    value={tmdbFilter}
+                                    onChange={(e) => handleTmdbFilterChange(e.target.value)}
+                                    className={`bg-slate-950 border rounded-xl px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer transition-all ${
+                                        tmdbFilter === 'suspicious'
+                                            ? 'border-rose-500/60 text-rose-400 bg-rose-500/10'
+                                            : tmdbFilter === 'missing'
+                                            ? 'border-amber-500/60 text-amber-400 bg-amber-500/10'
+                                            : tmdbFilter === 'synced'
+                                            ? 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10'
+                                            : 'border-slate-800 text-slate-300'
+                                    }`}
+                                >
+                                    <option value="all" className="bg-slate-900 text-slate-200">Tüm TMDB Durumları</option>
+                                    <option value="suspicious" className="bg-slate-900 text-rose-400 font-bold">
+                                        ⚠️ Hatalı / Şüpheli Eşleşmeler {suspiciousCount > 0 ? `(${suspiciousCount})` : ''}
+                                    </option>
+                                    <option value="missing" className="bg-slate-900 text-amber-400 font-bold">
+                                        ⚠️ TMDB Eksik Olanlar {unsyncedCount > 0 ? `(${unsyncedCount})` : ''}
+                                    </option>
+                                    <option value="synced" className="bg-slate-900 text-emerald-400 font-bold">✓ TMDB Eşleşmiş</option>
+                                </select>
+                            </div>
+
                             <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
                                 <input
                                     type="text"
-                                    placeholder="İçerik veya dosya adı ara..."
+                                    placeholder="İçerik, IMDb ID (tt...), TMDB ID veya dosya adı ara..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-48 md:w-64"
@@ -727,6 +966,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                         <div className="fixed inset-0 z-20" onClick={() => setSelectDropdownOpen(false)}></div>
                                         <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl py-1.5 z-30 divide-y divide-slate-800/60 text-xs">
                                             <div className="py-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('suspicious_tmdb')}
+                                                    className="w-full text-left px-4 py-2 text-rose-400 hover:bg-slate-800/80 font-medium flex items-center justify-between transition-colors"
+                                                >
+                                                    <span>Hatalı/Şüpheli Eşleşmeleri Seç</span>
+                                                    <span className="text-[10px] bg-rose-400/10 border border-rose-400/30 px-1.5 py-0.5 rounded font-mono">⚠️ Şüpheli</span>
+                                                </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => selectByFilter('missing_tmdb')}
@@ -887,9 +1134,19 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                             </button>
 
                                                             {m.poster_url ? (
-                                                                <img src={m.poster_url} alt="" className="w-9 h-13 object-cover rounded-md border border-slate-800 shrink-0" />
+                                                                <div className="relative shrink-0">
+                                                                    <img src={m.poster_url} alt="" className={`w-9 h-13 object-cover rounded-md border ${m.tmdb_match_status?.status === 'suspicious' ? 'border-rose-500/80 shadow-rose-900/50 shadow-md' : 'border-slate-800'}`} />
+                                                                    {m.tmdb_match_status?.status === 'suspicious' && (
+                                                                        <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-slate-950 shadow-sm" title="Hatalı / Şüpheli Eşleşme">!</span>
+                                                                    )}
+                                                                </div>
                                                             ) : (
-                                                                <div className="w-9 h-13 rounded-md bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 text-xs shrink-0">?</div>
+                                                                <div className="relative shrink-0">
+                                                                    <div className={`w-9 h-13 rounded-md bg-slate-900 border flex items-center justify-center text-xs shrink-0 ${m.tmdb_match_status?.status === 'suspicious' ? 'border-rose-500/80 text-rose-400 bg-rose-500/10' : 'border-slate-800 text-slate-600'}`}>?</div>
+                                                                    {m.tmdb_match_status?.status === 'suspicious' && (
+                                                                        <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-slate-950 shadow-sm" title="Hatalı / Şüpheli Eşleşme">!</span>
+                                                                    )}
+                                                                </div>
                                                             )}
 
                                                             <div>
@@ -911,7 +1168,19 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
 
                                                     {/* TMDB Status */}
                                                     <td className="px-4 py-3">
-                                                        {m.tmdb_id ? (
+                                                        {m.tmdb_match_status?.status === 'suspicious' ? (
+                                                            <div className="flex flex-col gap-0.5">
+                                                                <span className="text-xs font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded-lg inline-flex items-center gap-1.5 shadow-sm" title={m.tmdb_match_status.issues?.join(', ')}>
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                                                                    <span>⚠️ Şüpheli Eşleşme</span>
+                                                                </span>
+                                                                {m.tmdb_match_status.issues?.length > 0 && (
+                                                                    <span className="text-[10px] font-medium text-rose-300/80 font-mono">
+                                                                        {m.tmdb_match_status.issues.join(', ')}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        ) : m.tmdb_id ? (
                                                             <span className="text-xs font-medium text-emerald-400 flex items-center gap-1.5">
                                                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                                                                 {m.vote_average ? `★ ${m.vote_average.toFixed(1)}` : 'Eşleşti'}
@@ -984,12 +1253,11 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                 type="button"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    syncTmdbSingle(m.id);
+                                                                    openSingleTmdbModal(m);
                                                                 }}
-                                                                disabled={syncingId === m.id}
                                                                 className="text-xs text-slate-300 hover:text-white font-medium"
                                                             >
-                                                                {syncingId === m.id ? 'Yükleniyor...' : 'TMDB'}
+                                                                TMDB
                                                             </button>
                                                             <button
                                                                 type="button"
@@ -1096,11 +1364,10 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                                     </button>
                                                                                                     <button
                                                                                                         type="button"
-                                                                                                        onClick={() => syncTmdbSingle(ver.id)}
-                                                                                                        disabled={syncingId === ver.id}
+                                                                                                        onClick={() => openSingleTmdbModal(ver)}
                                                                                                         className="text-xs text-slate-300 hover:text-white font-medium"
                                                                                                     >
-                                                                                                        {syncingId === ver.id ? '...' : 'TMDB'}
+                                                                                                        TMDB
                                                                                                     </button>
                                                                                                     <button
                                                                                                         type="button"
@@ -1168,11 +1435,10 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                             </button>
                                                                                             <button
                                                                                                 type="button"
-                                                                                                onClick={() => syncTmdbSingle(ver.id)}
-                                                                                                disabled={syncingId === ver.id}
+                                                                                                onClick={() => openSingleTmdbModal(ver)}
                                                                                                 className="text-xs text-slate-300 hover:text-white font-medium"
                                                                                             >
-                                                                                                {syncingId === ver.id ? '...' : 'TMDB'}
+                                                                                                TMDB
                                                                                             </button>
                                                                                             <button
                                                                                                 type="button"
@@ -1717,6 +1983,262 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                     </div>
                 </div>,
                 document.body
+            )}
+
+            {/* Floating Bottom-Right Media Scan Progress Overlay (Portal to document.body) */}
+            {scanProgress.active && typeof document !== 'undefined' && createPortal(
+                <div className="fixed bottom-6 right-6 md:bottom-8 md:right-8 z-[99999] w-80 md:w-96 rounded-3xl bg-[#0f1422]/95 border border-emerald-500/40 p-5 shadow-2xl backdrop-blur-xl text-xs transition-all space-y-3 animate-fadeIn">
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                        <div className="flex items-center gap-2.5 font-bold text-white text-sm">
+                            {!scanProgress.completed ? (
+                                <span className="relative flex h-3 w-3">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                                </span>
+                            ) : (
+                                <span className="text-emerald-400 text-sm">✓</span>
+                            )}
+                            <span>Otomatik Medya Taraması</span>
+                        </div>
+
+                        {!scanProgress.completed ? (
+                            <button
+                                type="button"
+                                onClick={cancelScan}
+                                className="text-slate-400 hover:text-rose-400 text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-slate-800/60 hover:bg-rose-500/10 border border-slate-700/60 transition-all"
+                            >
+                                İptal Et
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={closeScanProgress}
+                                className="text-slate-400 hover:text-white text-xs font-semibold p-1 rounded-lg hover:bg-slate-800 transition-all"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Title & Progress info */}
+                    <div className="space-y-1.5">
+                        <div className="text-[11px] font-medium text-slate-400 flex justify-between items-center">
+                            <span className="truncate max-w-[220px] text-slate-200 font-mono">
+                                {scanProgress.completed
+                                    ? scanProgress.currentTitle
+                                    : `Taranıyor: ${scanProgress.currentTitle || 'Hazırlanıyor...'}`}
+                            </span>
+                            <span className="font-bold text-emerald-400 font-mono text-xs">
+                                %{scanProgress.percent}
+                            </span>
+                        </div>
+
+                        {/* Progress Track */}
+                        <div className="h-2 w-full rounded-full bg-slate-950 border border-slate-800 overflow-hidden p-0.5">
+                            <div
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                    scanProgress.completed
+                                        ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                        : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-400 animate-pulse'
+                                }`}
+                                style={{ width: `${Math.max(scanProgress.percent, 3)}%` }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Summary Numbers */}
+                    <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1">
+                        <div>
+                            Hedef: <strong className="text-white">{scanProgress.current}</strong> / <strong className="text-white">{scanProgress.total}</strong>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px]">
+                            <span className="text-emerald-400 font-semibold" title="Yeni Eklendi">+{scanProgress.addedCount}</span>
+                            <span className="text-amber-400 font-semibold" title="Güncellendi">~{scanProgress.updatedCount}</span>
+                            <span className="text-slate-400 font-semibold" title="Erişilemedi">-{scanProgress.missingCount}</span>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {/* Single Media TMDB Search & Update Modal */}
+            {singleTmdbModalOpen && editingMedia && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+                    <div className="w-full max-w-3xl bg-[#121724] border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+                        {/* Modal Header */}
+                        <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                {editingMedia.poster_url ? (
+                                    <img src={editingMedia.poster_url} alt="" className="w-9 h-12 object-cover rounded-lg border border-slate-700 shrink-0" />
+                                ) : (
+                                    <div className="w-9 h-12 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-xs text-slate-500 font-bold shrink-0">
+                                        ?
+                                    </div>
+                                )}
+                                <div className="min-w-0">
+                                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                                        <span>TMDB Bilgilerini Güncelle</span>
+                                        {editingMedia.tmdb_id ? (
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                                TMDB ID: {editingMedia.tmdb_id}
+                                            </span>
+                                        ) : (
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                                TMDB Eksik
+                                            </span>
+                                        )}
+                                    </h3>
+                                    <p className="text-xs text-slate-400 truncate max-w-md mt-0.5 font-mono">
+                                        {editingMedia.title} {editingMedia.file_name ? `• ${editingMedia.file_name}` : ''}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={closeSingleTmdbModal}
+                                className="text-slate-400 hover:text-white font-bold text-xl p-1 rounded-lg hover:bg-slate-800 transition-all shrink-0"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 overflow-y-auto flex-1 space-y-5">
+                            {/* Search Form */}
+                            <form onSubmit={handleSingleTmdbSearchSubmit} className="space-y-2">
+                                <label className="text-xs font-bold text-indigo-300 flex items-center justify-between">
+                                    <span>TMDB ID, IMDb ID veya Başlık ile Arama Yapın:</span>
+                                    <span className="text-[10px] font-normal text-slate-400">Örn: 550976, tt0440492 veya Death Note</span>
+                                </label>
+                                <div className="flex gap-2">
+                                    <div className="relative flex-1">
+                                        <input
+                                            type="text"
+                                            value={singleTmdbQuery}
+                                            onChange={(e) => setSingleTmdbQuery(e.target.value)}
+                                            placeholder="TMDB ID, IMDb ID (tt...) veya içerik adı yazın..."
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono shadow-inner"
+                                        />
+                                        {singleTmdbQuery && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setSingleTmdbQuery('');
+                                                    setSingleTmdbResults([]);
+                                                }}
+                                                className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 text-xs"
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={searchingSingleTmdb || !singleTmdbQuery.trim()}
+                                        className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition-all shadow-md flex items-center gap-2 shrink-0"
+                                    >
+                                        {searchingSingleTmdb ? (
+                                            <>
+                                                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                                <span>Aranıyor...</span>
+                                            </>
+                                        ) : (
+                                            <span>Ara</span>
+                                        )}
+                                    </button>
+                                </div>
+                            </form>
+
+                            {/* Results List */}
+                            <div className="space-y-3 pt-2">
+                                <div className="flex items-center justify-between text-xs text-slate-400">
+                                    <span className="font-semibold text-slate-300">TMDB Arama Sonuçları</span>
+                                    <span>{singleTmdbResults.length} sonuç bulundu</span>
+                                </div>
+
+                                {searchingSingleTmdb ? (
+                                    <div className="p-10 text-center text-xs text-slate-400 space-y-2">
+                                        <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                                        <p>TMDB sunucularında arama yapılıyor...</p>
+                                    </div>
+                                ) : singleTmdbResults.length === 0 ? (
+                                    <div className="p-10 text-center bg-slate-950/60 rounded-2xl border border-slate-800/80 text-xs text-slate-400 space-y-1">
+                                        <p className="font-semibold text-slate-300">Sonuç Bulunamadı</p>
+                                        <p className="text-[11px] text-slate-500">Lütfen geçerli bir TMDB ID (ör: 550976), IMDb ID (ör: tt0440492) veya filmin İngilizce adını yazarak arayın.</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {singleTmdbResults.map((item) => (
+                                            <div
+                                                key={item.id}
+                                                className="p-4 bg-slate-950/80 hover:bg-slate-900 border border-slate-800/80 hover:border-indigo-500/50 rounded-2xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
+                                            >
+                                                <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                                                    {item.poster_url ? (
+                                                        <img src={item.poster_url} alt="" className="w-12 h-16 object-cover rounded-xl border border-slate-800 shrink-0 shadow-md" />
+                                                    ) : (
+                                                        <div className="w-12 h-16 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-xs text-slate-600 font-bold shrink-0">
+                                                            ?
+                                                        </div>
+                                                    )}
+                                                    <div className="min-w-0 flex-1 space-y-1">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="font-bold text-white text-sm group-hover:text-indigo-300 transition-colors">
+                                                                {item.title}
+                                                            </span>
+                                                            {item.year && (
+                                                                <span className="text-xs text-slate-400 font-normal">({item.year})</span>
+                                                            )}
+                                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                                                                {item.media_type === 'movie' ? 'Film' : 'Dizi'}
+                                                            </span>
+                                                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                                                TMDB #{item.id}
+                                                            </span>
+                                                            {item.vote_average && (
+                                                                <span className="text-xs font-semibold text-amber-400">
+                                                                    ★ {item.vote_average.toFixed(1)}
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        {item.original_title && item.original_title !== item.title && (
+                                                            <p className="text-xs text-slate-400 font-mono">
+                                                                Orijinal Adı: <span className="text-slate-300">{item.original_title}</span>
+                                                            </p>
+                                                        )}
+
+                                                        {item.overview && (
+                                                            <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                                                                {item.overview}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => applySingleTmdbSelection(item)}
+                                                    disabled={updatingSingleTmdbId === item.id}
+                                                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all shadow-md shrink-0 flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                                >
+                                                    {updatingSingleTmdbId === item.id ? (
+                                                        <>
+                                                            <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                                            <span>Güncelleniyor...</span>
+                                                        </>
+                                                    ) : (
+                                                        <span>Seç & Güncelle</span>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </AuthenticatedLayout>
     );
