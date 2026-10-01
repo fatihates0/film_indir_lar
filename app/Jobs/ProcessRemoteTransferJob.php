@@ -13,11 +13,14 @@ class ProcessRemoteTransferJob implements ShouldQueue
     use Queueable;
 
     public int $timeout = 86400; // 24 hours max for large multi-gigabyte files
+
     public int $tries = 1;
 
     public function __construct(
         public RemoteTransfer $transfer
-    ) {}
+    ) {
+        $this->onQueue('transfers');
+    }
 
     public function handle(RemoteTransferService $transferService): void
     {
@@ -34,6 +37,7 @@ class ProcessRemoteTransferJob implements ShouldQueue
         if ($activeCount >= $maxConcurrent) {
             Log::info("ProcessRemoteTransferJob: Concurrency limit ({$maxConcurrent}) reached (active: {$activeCount}). Releasing transfer #{$transfer->id} back to queue.");
             $this->release(5);
+
             return;
         }
 

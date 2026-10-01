@@ -1,9 +1,9 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { Fragment, useState, useRef } from 'react';
+import { Fragment, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCount = 0, suspiciousCount = 0, filters = {} }) {
+export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCount = 0, suspiciousCount = 0, activeScan = null, filters = {} }) {
     const flash = usePage().props.flash;
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
@@ -91,18 +91,76 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
 
     // Media Scan Progress Bar Overlay State
     const [scanProgress, setScanProgress] = useState({
-        active: false,
+        active: !!activeScan,
         completed: false,
-        current: 0,
-        total: 0,
-        percent: 0,
-        currentTitle: '',
-        addedCount: 0,
-        updatedCount: 0,
-        missingCount: 0,
-        scannedTotal: 0,
+        scanId: activeScan?.id || null,
+        percent: Math.round(activeScan?.progress_percent || 0),
+        currentTitle: activeScan?.current_target || 'Kuyrukta bekliyor...',
+        addedCount: activeScan?.added_count || 0,
+        updatedCount: activeScan?.updated_count || 0,
+        missingCount: activeScan?.missing_count || 0,
+        scannedTotal: activeScan?.total_scanned || 0,
     });
-    const scanCancelledRef = useRef(false);
+
+    useEffect(() => {
+        let intervalId = null;
+
+        const checkStatus = async () => {
+            try {
+                const res = await fetch(route('admin.media.scan-status'));
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const active = data.active_scan;
+                    if (active) {
+                        setScanning(true);
+                        setScanProgress({
+                            active: true,
+                            completed: false,
+                            scanId: active.id,
+                            percent: Math.round(active.progress_percent || 0),
+                            currentTitle: active.current_target || 'Taranıyor...',
+                            addedCount: active.added_count || 0,
+                            updatedCount: active.updated_count || 0,
+                            missingCount: active.missing_count || 0,
+                            scannedTotal: active.total_scanned || 0,
+                        });
+                    } else {
+                        const latest = data.latest_scan;
+                        if (scanning || scanProgress.active) {
+                            setScanning(false);
+                            if (latest && (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled')) {
+                                setScanProgress({
+                                    active: true,
+                                    completed: true,
+                                    scanId: latest.id,
+                                    percent: 100,
+                                    currentTitle: latest.status === 'completed' 
+                                        ? 'Tüm Taramalar Tamamlandı!' 
+                                        : (latest.status === 'cancelled' ? 'Tarama İptal Edildi' : `Tarama Hatası: ${latest.error_message || ''}`),
+                                    addedCount: latest.added_count || 0,
+                                    updatedCount: latest.updated_count || 0,
+                                    missingCount: latest.missing_count || 0,
+                                    scannedTotal: latest.total_scanned || 0,
+                                });
+                                router.reload({ preserveScroll: true });
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        };
+
+        if (scanning || activeScan) {
+            checkStatus();
+            intervalId = setInterval(checkStatus, 2000);
+        }
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [scanning]);
 
     const [selectedIds, setSelectedIds] = useState([]);
     const [selectionMode, setSelectionMode] = useState(false);
@@ -696,100 +754,62 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
     };
 
     const triggerScan = async () => {
-        if (scanProgress.active && !scanProgress.completed) return;
+        if (scanning || (scanProgress.active && !scanProgress.completed)) return;
 
         setScanning(true);
         try {
-            const res = await fetch(route('admin.media.scan-targets'));
-            const data = await res.json();
-            const targets = data.targets || [];
-
-            if (targets.length === 0) {
-                alert('Taranacak Storage Box bulunamadı.');
-                setScanning(false);
-                return;
-            }
-
-            scanCancelledRef.current = false;
-            setScanProgress({
-                active: true,
-                completed: false,
-                current: 0,
-                total: targets.length,
-                percent: 0,
-                currentTitle: targets[0]?.name || '',
-                addedCount: 0,
-                updatedCount: 0,
-                missingCount: 0,
-                scannedTotal: 0,
+            const response = await fetch(route('admin.media.scan-async'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                },
             });
-
-            let addedSum = 0;
-            let updatedSum = 0;
-            let missingSum = 0;
-            let scannedSum = 0;
-
-            for (let i = 0; i < targets.length; i++) {
-                if (scanCancelledRef.current) break;
-
-                const target = targets[i];
-                const currentNum = i + 1;
-                const pct = Math.round((currentNum / targets.length) * 100);
-
-                setScanProgress((prev) => ({
-                    ...prev,
-                    current: currentNum,
-                    percent: pct,
-                    currentTitle: target.name,
-                }));
-
-                try {
-                    const response = await fetch(route('admin.media.scan-target'), {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-                        },
-                        body: JSON.stringify(target),
-                    });
-                    const result = await response.json();
-                    if (result.status === 'success') {
-                        addedSum += result.added || 0;
-                        updatedSum += result.updated || 0;
-                        missingSum += result.missing || 0;
-                        scannedSum += result.total_scanned || 0;
-                    }
-                } catch (err) {
-                    console.error(err);
-                }
-
-                setScanProgress((prev) => ({
-                    ...prev,
-                    addedCount: addedSum,
-                    updatedCount: updatedSum,
-                    missingCount: missingSum,
-                    scannedTotal: scannedSum,
-                }));
+            const data = await response.json();
+            if (data.status === 'success' || data.status === 'already_running') {
+                const scan = data.scan;
+                setScanProgress({
+                    active: true,
+                    completed: false,
+                    scanId: scan.id,
+                    percent: Math.round(scan.progress_percent || 0),
+                    currentTitle: scan.current_target || 'Kuyrukta bekliyor...',
+                    addedCount: scan.added_count || 0,
+                    updatedCount: scan.updated_count || 0,
+                    missingCount: scan.missing_count || 0,
+                    scannedTotal: scan.total_scanned || 0,
+                });
+            } else {
+                setScanning(false);
             }
-
-            setScanProgress((prev) => ({
-                ...prev,
-                completed: true,
-                currentTitle: scanCancelledRef.current ? 'Tarama İptal Edildi' : 'Tüm Taramalar Tamamlandı!',
-            }));
-
-            router.reload({ preserveScroll: true });
         } catch (err) {
             console.error(err);
-            alert('Tarama işlemi başlatılırken bir hata oluştu.');
-        } finally {
+            alert('Tarama başlatılırken bir hata oluştu.');
             setScanning(false);
         }
     };
 
-    const cancelScan = () => {
-        scanCancelledRef.current = true;
+    const cancelScan = async () => {
+        if (!scanProgress.scanId) return;
+        try {
+            await fetch(route('admin.media.scan-cancel', { scan: scanProgress.scanId }), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                },
+            });
+            setScanProgress((prev) => ({
+                ...prev,
+                completed: true,
+                currentTitle: 'Tarama İptal Edildi',
+            }));
+            setScanning(false);
+        } catch (err) {
+            console.error(err);
+        }
     };
 
     const closeScanProgress = () => {

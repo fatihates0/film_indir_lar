@@ -3,12 +3,42 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { useEffect, useState } from 'react';
 
-export default function StorageBoxesIndex({ boxes, storage_summary, recent_transfers = [] }) {
+export default function StorageBoxesIndex({ boxes, storage_summary, recent_transfers = [], active_scans = [] }) {
     const flash = usePage().props.flash;
     const [addBoxModal, setAddBoxModal] = useState(false);
     const [editBoxModal, setEditBoxModal] = useState(null);
     const [addMediaModalBox, setAddMediaModalBox] = useState(null);
     const [infoModalBox, setInfoModalBox] = useState(null);
+    const [activeScans, setActiveScans] = useState(active_scans || []);
+
+    useEffect(() => {
+        let intervalId = null;
+        const checkScanStatus = async () => {
+            try {
+                const res = await fetch(route('admin.media.scan-status'));
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (data.active_scan) {
+                        setActiveScans([data.active_scan]);
+                    } else if (activeScans.length > 0) {
+                        setActiveScans([]);
+                        router.reload({ preserveScroll: true });
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        if (activeScans.length > 0) {
+            checkScanStatus();
+            intervalId = setInterval(checkScanStatus, 2500);
+        }
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [activeScans.length > 0]);
 
     // Remote Upload State
     const [remoteModalOpen, setRemoteModalOpen] = useState(false);
@@ -384,7 +414,29 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
     };
 
     const triggerScan = (boxId) => {
-        router.post(route('admin.storage-boxes.scan', boxId));
+        router.post(route('admin.storage-boxes.scan', boxId), {}, {
+            preserveScroll: true,
+            onSuccess: () => {
+                fetch(route('admin.media.scan-status'))
+                    .then((r) => r.json())
+                    .then((d) => {
+                        if (d.active_scan) setActiveScans([d.active_scan]);
+                    });
+            },
+        });
+    };
+
+    const triggerScanAll = () => {
+        router.post(route('admin.storage-boxes.scan-all'), {}, {
+            preserveScroll: true,
+            onSuccess: () => {
+                fetch(route('admin.media.scan-status'))
+                    .then((r) => r.json())
+                    .then((d) => {
+                        if (d.active_scan) setActiveScans([d.active_scan]);
+                    });
+            },
+        });
     };
 
     const deleteBox = (box) => {
@@ -414,6 +466,16 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                         </button>
 
                         <button
+                            onClick={triggerScanAll}
+                            className="inline-flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-200 border border-slate-700 shadow-md hover:scale-105 transition-all"
+                        >
+                            <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Tüm Box'ları Tara
+                        </button>
+
+                        <button
                             onClick={() => setAddBoxModal(true)}
                             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/30 hover:scale-105 transition-all"
                         >
@@ -426,6 +488,30 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
             <Head title="Storage Box Yönetimi - MedyaHub" />
 
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6">
+                {activeScans.length > 0 && (
+                    <div className="rounded-2xl bg-indigo-950/80 border border-indigo-500/40 p-4 text-xs text-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl backdrop-blur-md animate-fadeIn">
+                        <div className="flex items-center gap-3">
+                            <span className="relative flex h-3 w-3">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                            </span>
+                            <div>
+                                <div className="font-bold text-white text-sm">
+                                    Arka Plan Tarama İşlemi Devam Ediyor
+                                </div>
+                                <div className="text-slate-300 text-xs mt-0.5 font-mono">
+                                    {activeScans[0].current_target || 'Hazırlanıyor...'} (%{Math.round(activeScans[0].progress_percent || 0)})
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs font-mono bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-800">
+                            <span className="text-emerald-400 font-semibold" title="Yeni Eklendi">+{activeScans[0].added_count || 0} yeni</span>
+                            <span className="text-amber-400 font-semibold" title="Güncellendi">~{activeScans[0].updated_count || 0} güncellendi</span>
+                            <span className="text-slate-400 font-semibold" title="Erişilemedi">-{activeScans[0].missing_count || 0} eksik</span>
+                        </div>
+                    </div>
+                )}
+
                 {flash?.message && (
                     <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-4 text-sm text-emerald-300">
                         {flash.message}
@@ -657,12 +743,33 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                     </div>
 
                                     <div className="flex gap-2">
-                                        <button
-                                            onClick={() => triggerScan(box.id)}
-                                            className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 py-2 text-xs font-semibold text-slate-300 transition-all"
-                                        >
-                                            Tarama Çalıştır
-                                        </button>
+                                        {(() => {
+                                            const boxScan = activeScans.find(
+                                                (s) => s.storage_box_id === box.id || s.scan_type === 'all'
+                                            );
+                                            const isScanningBox = !!boxScan;
+
+                                            return (
+                                                <button
+                                                    onClick={() => triggerScan(box.id)}
+                                                    disabled={isScanningBox}
+                                                    className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 py-2 text-xs font-semibold text-slate-300 transition-all disabled:opacity-60 flex items-center justify-center gap-1.5"
+                                                >
+                                                    {isScanningBox ? (
+                                                        <>
+                                                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                                                            <span>
+                                                                {boxScan.status === 'pending'
+                                                                    ? 'Kuyrukta...'
+                                                                    : `Taranıyor %${Math.round(boxScan.progress_percent || 0)}`}
+                                                            </span>
+                                                        </>
+                                                    ) : (
+                                                        'Tarama Çalıştır'
+                                                    )}
+                                                </button>
+                                            );
+                                        })()}
                                         <button
                                             onClick={() => openEditModal(box)}
                                             className="px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700"

@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\MediaType;
 use App\Http\Controllers\Controller;
+use App\Jobs\MediaScanJob;
 use App\Models\Media;
+use App\Models\MediaScan;
 use App\Models\StorageBox;
 use App\Services\AuditLogService;
 use App\Services\DownloadAuthorizationService;
@@ -264,11 +266,17 @@ class MediaAdminController extends Controller
         $unsyncedCount = $allMedia->whereNull('tmdb_id')->count() + $allMedia->where('tmdb_id', 0)->count();
         $suspiciousCount = $allMedia->filter(fn ($m) => $m->tmdb_match_status['status'] === 'suspicious')->count();
 
+        $activeScan = MediaScan::with('storageBox')
+            ->whereIn('status', ['pending', 'running'])
+            ->latest()
+            ->first();
+
         return Inertia::render('Admin/Media/Index', [
             'media' => $media,
             'storageBoxes' => $storageBoxes,
             'unsyncedCount' => $unsyncedCount,
             'suspiciousCount' => $suspiciousCount,
+            'activeScan' => $activeScan,
             'filters' => $request->only(['search', 'per_page', 'tmdb_filter']),
         ]);
     }
@@ -610,22 +618,112 @@ class MediaAdminController extends Controller
         return back()->with('message', sprintf('Sezon %d kütüphaneden silindi (%d bölüm).', $seasonNumber, $count));
     }
 
-    public function triggerScan(): RedirectResponse
+    public function triggerScan(Request $request): RedirectResponse|JsonResponse
     {
-        $result = $this->scannerService->scanAll();
+        $existing = MediaScan::whereIn('status', ['pending', 'running'])->first();
+        if ($existing) {
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'status' => 'already_running',
+                    'scan' => $existing,
+                    'message' => 'Zaten devam eden bir tarama işlemi bulunuyor.',
+                ]);
+            }
+
+            return back()->with('error', 'Zaten devam eden bir tarama işlemi bulunuyor.');
+        }
+
+        $scan = MediaScan::create([
+            'user_id' => $request->user()?->id,
+            'scan_type' => 'all',
+            'status' => 'pending',
+            'current_target' => 'Kuyrukta bekliyor...',
+        ]);
+
+        MediaScanJob::dispatch($scan->id);
 
         $this->auditLogService->log(
-            action: 'media_scan_triggered',
-            targetType: 'Media',
-            newValues: $result
+            action: 'media_scan_queued',
+            targetType: 'MediaScan',
+            targetId: (string) $scan->id
         );
 
-        return back()->with('message', sprintf(
-            'Tüm Storage Box alanları ve klasörleri tarandı: %d yeni eklendi, %d güncellendi, %d erişilemez olarak işaretlendi.',
-            $result['added'],
-            $result['updated'],
-            $result['missing']
-        ));
+        if ($request->wantsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'scan' => $scan,
+                'message' => 'Otomatik tarama kuyruğa alındı ve arka planda başlatıldı.',
+            ]);
+        }
+
+        return back()->with('message', 'Otomatik tarama kuyruğa alındı ve arka planda başlatıldı.');
+    }
+
+    public function startAsyncScan(Request $request): JsonResponse
+    {
+        $existing = MediaScan::whereIn('status', ['pending', 'running'])->first();
+        if ($existing) {
+            return response()->json([
+                'status' => 'already_running',
+                'scan' => $existing,
+                'message' => 'Zaten devam eden bir tarama bulunuyor.',
+            ]);
+        }
+
+        $boxId = $request->input('storage_box_id');
+        $subDir = $request->input('sub_directory');
+        $scanType = $request->input('scan_type', $boxId ? 'box' : 'all');
+
+        $scan = MediaScan::create([
+            'storage_box_id' => $boxId ?: null,
+            'user_id' => $request->user()?->id,
+            'sub_directory' => $subDir ?: null,
+            'scan_type' => $scanType,
+            'status' => 'pending',
+            'current_target' => 'Kuyrukta bekliyor...',
+        ]);
+
+        MediaScanJob::dispatch($scan->id);
+
+        return response()->json([
+            'status' => 'success',
+            'scan' => $scan,
+            'message' => 'Tarama kuyruğa alındı.',
+        ]);
+    }
+
+    public function scanStatus(): JsonResponse
+    {
+        $activeScan = MediaScan::with('storageBox')
+            ->whereIn('status', ['pending', 'running'])
+            ->latest()
+            ->first();
+
+        $latestScan = MediaScan::with('storageBox')
+            ->latest()
+            ->first();
+
+        return response()->json([
+            'status' => 'success',
+            'active_scan' => $activeScan,
+            'latest_scan' => $latestScan,
+        ]);
+    }
+
+    public function cancelScan(Request $request, MediaScan $scan): JsonResponse
+    {
+        if (in_array($scan->status, ['pending', 'running'], true)) {
+            $scan->update([
+                'status' => 'cancelled',
+                'current_target' => 'Kullanıcı tarafından iptal edildi',
+                'completed_at' => now(),
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Tarama işlemi iptal edildi.',
+        ]);
     }
 
     public function scanTargets(): JsonResponse
@@ -687,26 +785,39 @@ class MediaAdminController extends Controller
 
     public function scanTarget(Request $request): JsonResponse
     {
+        $existing = MediaScan::whereIn('status', ['pending', 'running'])->first();
+        if ($existing) {
+            return response()->json([
+                'status' => 'already_running',
+                'scan' => $existing,
+                'message' => 'Zaten devam eden bir tarama işlemi bulunuyor.',
+            ]);
+        }
+
         $boxId = $request->input('id');
         $subDir = (string) $request->input('sub_directory', '');
 
-        $box = $boxId ? StorageBox::find($boxId) : null;
-        $result = $this->scannerService->scan($box, $subDir);
+        $scan = MediaScan::create([
+            'storage_box_id' => $boxId ?: null,
+            'user_id' => $request->user()?->id,
+            'sub_directory' => $subDir ?: null,
+            'scan_type' => 'target',
+            'status' => 'pending',
+            'current_target' => 'Kuyrukta bekliyor...',
+        ]);
+
+        MediaScanJob::dispatch($scan->id);
 
         $this->auditLogService->log(
-            action: 'media_scan_target',
-            targetType: 'Media',
-            newValues: array_merge(['storage_box_id' => $boxId, 'sub_directory' => $subDir], $result)
+            action: 'media_scan_target_queued',
+            targetType: 'MediaScan',
+            targetId: (string) $scan->id
         );
 
         return response()->json([
             'status' => 'success',
-            'box_id' => $boxId,
-            'name' => $box ? $box->name : 'Varsayılan Depolama',
-            'added' => $result['added'] ?? 0,
-            'updated' => $result['updated'] ?? 0,
-            'missing' => $result['missing'] ?? 0,
-            'total_scanned' => $result['total_scanned'] ?? 0,
+            'scan' => $scan,
+            'message' => 'Tarama işlemi kuyruğa alındı ve arka planda başlatıldı.',
         ]);
     }
 

@@ -11,6 +11,11 @@ class QuotaResetJob implements ShouldQueue
 {
     use Queueable;
 
+    public function __construct()
+    {
+        $this->onQueue('default');
+    }
+
     public function handle(QuotaService $quotaService): void
     {
         User::where('status', 'active')->chunk(100, function ($users) use ($quotaService) {

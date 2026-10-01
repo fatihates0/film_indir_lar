@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\MediaType;
 use App\Models\Media;
+use App\Models\MediaScan;
 use App\Models\StorageBox;
 use Exception;
 use Illuminate\Support\Facades\Log;
@@ -126,13 +127,14 @@ class MediaScannerService
     /**
      * Tüm aktif Storage Box alanlarını ve içerisindeki tüm alt klasörleri otomatik keşfeder ve medyalarını veritabanına ekler.
      */
-    public function scanAll(): array
+    public function scanAll(?MediaScan $mediaScan = null): array
     {
         // 1. Önce sunucudaki tüm bağlı Storage Box'ları keşfet & senkronize et
         $discoveredBoxes = $this->discoverAndSyncMounts();
 
         // 2. DB'deki aktif tüm Storage Box'ları çek (Hem yerel mount hem Web paneli kayıtları)
         $allBoxes = StorageBox::where('is_active', true)->get();
+        $totalBoxes = count($allBoxes);
 
         $totalAdded = 0;
         $totalUpdated = 0;
@@ -140,13 +142,36 @@ class MediaScannerService
         $totalScanned = 0;
         $boxResults = [];
 
-        foreach ($allBoxes as $box) {
-            $res = $this->scan($box);
+        foreach ($allBoxes as $index => $box) {
+            if ($mediaScan) {
+                $mediaScan->refresh();
+                if ($mediaScan->status === 'cancelled') {
+                    throw new \RuntimeException('Tarama kullanıcı tarafından iptal edildi.');
+                }
+                $percent = $totalBoxes > 0 ? round(($index / $totalBoxes) * 100, 1) : 0;
+                $mediaScan->update([
+                    'progress_percent' => $percent,
+                    'current_target' => "{$box->name} taranıyor...",
+                ]);
+            }
+
+            $res = $this->scan($box, '', $mediaScan);
             $totalAdded += $res['added'];
             $totalUpdated += $res['updated'];
             $totalMissing += $res['missing'];
             $totalScanned += $res['total_scanned'];
             $boxResults[$box->name] = $res;
+        }
+
+        if ($mediaScan) {
+            $mediaScan->update([
+                'progress_percent' => 100,
+                'current_target' => 'Tamamlandı',
+                'total_scanned' => $totalScanned,
+                'added_count' => $totalAdded,
+                'updated_count' => $totalUpdated,
+                'missing_count' => $totalMissing,
+            ]);
         }
 
         return [
@@ -164,7 +189,7 @@ class MediaScannerService
     /**
      * Belirli bir Storage Box alanını ve altındaki TÜM klasörleri derinlemesine tarar.
      */
-    public function scan(?StorageBox $storageBox = null, string $subDirectory = ''): array
+    public function scan(?StorageBox $storageBox = null, string $subDirectory = '', ?MediaScan $mediaScan = null): array
     {
         $mountPath = $storageBox ? $storageBox->mount_path : config('storagebox.mount_path', storage_path('app/storagebox'));
 
@@ -172,11 +197,20 @@ class MediaScannerService
         if (! $this->safeFileExists($mountPath) || ! $this->safeIsReadable($mountPath)) {
             if ($storageBox && ! empty($storageBox->host) && ! empty($storageBox->username) && ! empty($storageBox->password)) {
                 $storageBox->update(['status' => 'online']);
-                $remoteRes = $this->scanRemoteWebdav($storageBox, $subDirectory);
+                $remoteRes = $this->scanRemoteWebdav($storageBox, $subDirectory, $mediaScan);
 
                 // Silinenleri kontrol et
                 $missingQuery = Media::where('is_available', true)->where('storage_box_id', $storageBox->id);
                 $missingCount = $missingQuery->whereNotIn('file_path', $remoteRes['scanned_paths'])->update(['is_available' => false]);
+
+                if ($mediaScan && $mediaScan->scan_type !== 'all') {
+                    $mediaScan->update([
+                        'total_scanned' => count($remoteRes['scanned_paths']),
+                        'added_count' => $remoteRes['added'],
+                        'updated_count' => $remoteRes['updated'],
+                        'missing_count' => $missingCount,
+                    ]);
+                }
 
                 return [
                     'status' => 'success',
@@ -232,6 +266,8 @@ class MediaScannerService
             \RecursiveIteratorIterator::CATCH_GET_CHILD
         );
 
+        $processedCount = 0;
+
         foreach ($iterator as $file) {
             try {
                 if ($file->isFile()) {
@@ -243,6 +279,24 @@ class MediaScannerService
                     $fileName = $file->getFilename();
                     if (Str::contains($fileName, ['sample', 'Sample', 'trailer', 'Trailer']) && $file->getSize() < 100 * 1024 * 1024) {
                         continue;
+                    }
+
+                    $processedCount++;
+
+                    // Live Cancellation check and progress update
+                    if ($mediaScan && $processedCount % 5 === 0) {
+                        $mediaScan->refresh();
+                        if ($mediaScan->status === 'cancelled') {
+                            throw new \RuntimeException('Tarama kullanıcı tarafından iptal edildi.');
+                        }
+                        if ($mediaScan->scan_type !== 'all') {
+                            $mediaScan->update([
+                                'total_scanned' => count($scannedPaths),
+                                'added_count' => $added,
+                                'updated_count' => $updated,
+                                'current_target' => "{$fileName} taranıyor...",
+                            ]);
+                        }
                     }
 
                     $fullPath = $file->getRealPath() ?: $file->getPathname();
@@ -346,6 +400,9 @@ class MediaScannerService
                     }
                 }
             } catch (\Throwable $e) {
+                if ($e->getMessage() === 'Tarama kullanıcı tarafından iptal edildi.') {
+                    throw $e;
+                }
                 Log::warning('Media scan error for file: '.$e->getMessage());
 
                 continue;
@@ -359,6 +416,16 @@ class MediaScannerService
         }
         $missingCount = $missingQuery->whereNotIn('file_path', $scannedPaths)->update(['is_available' => false]);
 
+        if ($mediaScan && $mediaScan->scan_type !== 'all') {
+            $mediaScan->update([
+                'total_scanned' => count($scannedPaths),
+                'added_count' => $added,
+                'updated_count' => $updated,
+                'missing_count' => $missingCount,
+                'progress_percent' => 100,
+            ]);
+        }
+
         return [
             'status' => 'success',
             'added' => $added,
@@ -371,7 +438,7 @@ class MediaScannerService
     /**
      * WebDAV üzerinden uzaktaki Storage Box'taki tüm dizinleri özyinelemeli (recursive) tarar.
      */
-    protected function scanRemoteWebdav(StorageBox $storageBox, string $relativePath = ''): array
+    protected function scanRemoteWebdav(StorageBox $storageBox, string $relativePath = '', ?MediaScan $mediaScan = null): array
     {
         if (empty($storageBox->host) || empty($storageBox->username) || empty($storageBox->password)) {
             return ['added' => 0, 'updated' => 0, 'scanned_paths' => []];
@@ -389,6 +456,20 @@ class MediaScannerService
         $directoriesToScan = [$relativePath];
 
         while (! empty($directoriesToScan)) {
+            if ($mediaScan) {
+                $mediaScan->refresh();
+                if ($mediaScan->status === 'cancelled') {
+                    throw new \RuntimeException('Tarama kullanıcı tarafından iptal edildi.');
+                }
+                if ($mediaScan->scan_type !== 'all') {
+                    $mediaScan->update([
+                        'total_scanned' => count($scannedPaths),
+                        'added_count' => $added,
+                        'updated_count' => $updated,
+                    ]);
+                }
+            }
+
             $currentDir = array_shift($directoriesToScan);
             $pathSegments = explode('/', trim(str_replace('\\', '/', $currentDir), '/'));
             $cleanPath = implode('/', array_map('rawurlencode', array_filter($pathSegments, fn ($s) => $s !== '')));

@@ -61,6 +61,9 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
     Route::post('/media', [MediaAdminController::class, 'store'])->name('media.store');
     Route::post('/media/probe', [MediaAdminController::class, 'probe'])->name('media.probe');
     Route::post('/media/scan', [MediaAdminController::class, 'triggerScan'])->name('media.scan');
+    Route::get('/media/scan-status', [MediaAdminController::class, 'scanStatus'])->name('media.scan-status');
+    Route::post('/media/scan-cancel/{scan}', [MediaAdminController::class, 'cancelScan'])->name('media.scan-cancel');
+    Route::post('/media/scan-async', [MediaAdminController::class, 'startAsyncScan'])->name('media.scan-async');
     Route::get('/media/scan-targets', [MediaAdminController::class, 'scanTargets'])->name('media.scan-targets');
     Route::post('/media/scan-target', [MediaAdminController::class, 'scanTarget'])->name('media.scan-target');
     Route::get('/media/tmdb-search', [MediaAdminController::class, 'searchTmdb'])->name('media.tmdb-search');
