@@ -918,6 +918,25 @@ process_webdav() {
 
     local total_count=$(echo "$file_paths" | grep -c . || echo 0)
     local current_idx=0
+    local cached_count=0
+
+    while read -r raw_href; do
+        if [ -z "$raw_href" ]; then continue; fi
+        local cache_key="webdav_${REMOTE_URL}_${raw_href}"
+        if is_cached "$cache_key"; then
+            cached_count=$((cached_count + 1))
+        fi
+    done <<< "$file_paths"
+
+    if [ "$cached_count" -gt 0 ]; then
+        echo -e "${YELLOW}Önbellekteki ${cached_count} içerik atlandı.${NC}"
+        echo ""
+    fi
+
+    if [ "$cached_count" -eq "$total_count" ] && [ "$total_count" -gt 0 ]; then
+        echo -e "${GREEN}Tüm dosyalar daha önce işlenmiş (Yeni dosya yok).${NC}"
+        return
+    fi
 
     echo "$file_paths" | while read -r raw_href; do
         if [ -z "$raw_href" ]; then continue; fi
@@ -929,10 +948,6 @@ process_webdav() {
         # Önbellek (Cache) Kontrolü
         local cache_key="webdav_${REMOTE_URL}_${raw_href}"
         if is_cached "$cache_key"; then
-            echo -e "${BLUE}------------------------------------------------------------${NC}" >&2
-            echo -e "${CYAN}[${current_idx}/${total_count}] ${YELLOW}[ÖNBELLEK/CACHE]${NC} $file_name" >&2
-            echo -e "${YELLOW}--> Dosya önbellekte kayıtlı (daha önce işlendi), istek atılmadan atlanıyor.${NC}" >&2
-            echo "" >&2
             continue
         fi
 
@@ -1090,6 +1105,25 @@ process_ftp() {
 
     local total_count=$(echo "$file_list" | grep -c . || echo 0)
     local current_idx=0
+    local cached_count=0
+
+    while read -r rel_path; do
+        if [ -z "$rel_path" ]; then continue; fi
+        local cache_key="ftp_${REMOTE_HOST}:${REMOTE_PORT}_${rel_path}"
+        if is_cached "$cache_key"; then
+            cached_count=$((cached_count + 1))
+        fi
+    done <<< "$file_list"
+
+    if [ "$cached_count" -gt 0 ]; then
+        echo -e "${YELLOW}Önbellekteki ${cached_count} içerik atlandı.${NC}"
+        echo ""
+    fi
+
+    if [ "$cached_count" -eq "$total_count" ] && [ "$total_count" -gt 0 ]; then
+        echo -e "${GREEN}Tüm dosyalar daha önce işlenmiş (Yeni dosya yok).${NC}"
+        return
+    fi
 
     echo "$file_list" | while read -r rel_path; do
         if [ -z "$rel_path" ]; then continue; fi
@@ -1101,10 +1135,6 @@ process_ftp() {
         # Önbellek (Cache) Kontrolü
         local cache_key="ftp_${REMOTE_HOST}:${REMOTE_PORT}_${rel_path}"
         if is_cached "$cache_key"; then
-            echo -e "${BLUE}------------------------------------------------------------${NC}" >&2
-            echo -e "${CYAN}[${current_idx}/${total_count}] ${YELLOW}[ÖNBELLEK/CACHE]${NC} $file_name" >&2
-            echo -e "${YELLOW}--> Dosya önbellekte kayıtlı (daha önce işlendi), atlanıyor.${NC}" >&2
-            echo "" >&2
             continue
         fi
 
@@ -1192,6 +1222,25 @@ process_local() {
 
     local total_count=$(echo "$file_list" | grep -c . || echo 0)
     local current_idx=0
+    local cached_count=0
+
+    while read -r file_path; do
+        if [ -z "$file_path" ]; then continue; fi
+        local cache_key="local_${file_path}"
+        if is_cached "$cache_key"; then
+            cached_count=$((cached_count + 1))
+        fi
+    done <<< "$file_list"
+
+    if [ "$cached_count" -gt 0 ]; then
+        echo -e "${YELLOW}Önbellekteki ${cached_count} içerik atlandı.${NC}"
+        echo ""
+    fi
+
+    if [ "$cached_count" -eq "$total_count" ] && [ "$total_count" -gt 0 ]; then
+        echo -e "${GREEN}Tüm dosyalar daha önce işlenmiş (Yeni dosya yok).${NC}"
+        return
+    fi
 
     echo "$file_list" | while read -r file_path; do
         if [ -z "$file_path" ]; then continue; fi
@@ -1203,10 +1252,6 @@ process_local() {
         # Önbellek (Cache) Kontrolü
         local cache_key="local_${file_path}"
         if is_cached "$cache_key"; then
-            echo -e "${BLUE}------------------------------------------------------------${NC}" >&2
-            echo -e "${CYAN}[${current_idx}/${total_count}] ${YELLOW}[ÖNBELLEK/CACHE]${NC} $file_name" >&2
-            echo -e "${YELLOW}--> Dosya önbellekte kayıtlı (daha önce işlendi), atlanıyor.${NC}" >&2
-            echo "" >&2
             continue
         fi
 
