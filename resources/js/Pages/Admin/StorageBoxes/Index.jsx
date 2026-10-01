@@ -649,30 +649,30 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                 </div>
 
                 {/* Remote File Transfers Queue Section */}
-                <div className="rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-800">
+                <div className="rounded-3xl bg-[#0f1422] border border-slate-800 overflow-hidden shadow-2xl space-y-0">
+                    <div className="p-6 border-b border-slate-800 bg-slate-900/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="text-lg font-bold text-white tracking-tight">Uzaktan Dosya Aktarım Kuyruğu (Remote Transfers)</h3>
-                                
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                                <h3 className="text-base font-bold text-white tracking-tight">Uzaktan Dosya Aktarım Kuyruğu (Remote Transfers)</h3>
+
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
                                         ✓ {statusCounts.completed} Tamamlandı
                                     </span>
 
                                     {(statusCounts.transferring > 0 || statusCounts.pending > 0) && (
-                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse flex items-center gap-1">
+                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 animate-pulse flex items-center gap-1">
                                             ⏳ {statusCounts.in_progress} İşlem Bekliyor / Aktarılıyor
                                         </span>
                                     )}
 
                                     {statusCounts.failed > 0 && (
-                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-300 border border-rose-500/30 flex items-center gap-1">
                                             ✕ {statusCounts.failed} Hatalı
                                         </span>
                                     )}
 
-                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800/80 text-slate-300 border border-slate-700/80 font-mono">
                                         Toplam {statusCounts.total ?? pagination?.total ?? transfers.length} İşlem
                                     </span>
                                 </div>
@@ -680,19 +680,19 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                             <p className="text-xs text-slate-400 mt-1">Harici linklerden doğrudan Storage Box'a aktarılan dosyaların anlık durumu ve indirme hızları.</p>
                         </div>
 
-                        <div className="flex items-center gap-2 self-start flex-wrap">
-                            <div className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800/90 border border-slate-700/80 px-3 py-1.5 text-xs text-slate-300">
+                        <div className="flex items-center gap-2.5 self-start md:self-auto flex-wrap">
+                            <div className="inline-flex items-center gap-1.5 rounded-xl bg-slate-950 border border-slate-800 px-3 py-1.5 text-xs text-slate-300">
                                 <span className="font-medium text-slate-400">Sayfa Başı:</span>
                                 <select
                                     value={perPage}
                                     onChange={(e) => handlePerPageChange(Number(e.target.value))}
-                                    className="rounded-lg bg-slate-900 border-slate-700 text-slate-200 text-xs py-0.5 px-2 font-semibold focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
+                                    className="bg-transparent text-white text-xs py-0 px-1 font-semibold focus:outline-none cursor-pointer"
                                 >
-                                    <option value={10}>10 Adet</option>
-                                    <option value={25}>25 Adet</option>
-                                    <option value={50}>50 Adet</option>
-                                    <option value={100}>100 Adet</option>
-                                    <option value={250}>250 Adet</option>
+                                    <option value={10} className="bg-slate-900 text-white">10 Adet</option>
+                                    <option value={25} className="bg-slate-900 text-white">25 Adet</option>
+                                    <option value={50} className="bg-slate-900 text-white">50 Adet</option>
+                                    <option value={100} className="bg-slate-900 text-white">100 Adet</option>
+                                    <option value={250} className="bg-slate-900 text-white">250 Adet</option>
                                 </select>
                             </div>
 
@@ -701,30 +701,32 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                     type="button"
                                     onClick={handleClearCompleted}
                                     disabled={isBulkDeleting}
-                                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white transition-all disabled:opacity-50"
+                                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white transition-all disabled:opacity-50"
                                     title="Bu sayfadaki sonuçlanmış veya hatalı işlemleri siler"
                                 >
                                     <span>🧹</span>
                                     <span>Tamamlananları Temizle</span>
                                 </button>
                             )}
+
                             <button
                                 onClick={() => setRemoteModalOpen(true)}
-                                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-lg transition-all"
+                                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 text-xs font-bold text-white shadow-md hover:scale-[1.02] transition-all"
                             >
-                                + Yeni Link Ekle
+                                <span>+</span>
+                                <span>Yeni Link Ekle</span>
                             </button>
                         </div>
                     </div>
 
                     {/* Bulk Selection Action Bar */}
                     {selectedTransferIds.length > 0 && (
-                        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-200 animate-fadeIn">
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-indigo-500/10 border-b border-indigo-500/20 text-indigo-200 animate-fadeIn">
                             <div className="flex items-center gap-2.5 text-xs font-medium flex-wrap">
-                                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[11px] font-bold">
+                                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[11px] font-bold shadow">
                                     {selectedTransferIds.length}
                                 </span>
-                                <span>kayıt seçildi</span>
+                                <span className="font-semibold text-white">kayıt seçildi</span>
                                 {activeSelectedTransfers.length > 0 && (
                                     <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold animate-pulse">
                                         ⚡ {activeSelectedTransfers.length} aktif işlem
@@ -744,7 +746,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                         type="button"
                                         disabled={isBulkDeleting}
                                         onClick={handleBulkCancel}
-                                        className="px-3.5 py-1.5 rounded-xl bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-bold shadow-lg shadow-amber-600/30 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                                        className="px-3.5 py-1.5 rounded-xl bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all disabled:opacity-50"
                                         title="Seçilen aktif indirmeleri durdurur fakat kayıtlarını korur"
                                     >
                                         <span>⏹</span>
@@ -755,7 +757,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                     type="button"
                                     disabled={isBulkDeleting}
                                     onClick={handleBulkDelete}
-                                    className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                                    className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all disabled:opacity-50"
                                     title={activeSelectedTransfers.length > 0 ? 'Önce çalışanları durdurur, ardından tüm seçilenleri siler' : 'Seçilenleri sil'}
                                 >
                                     <span>🗑</span>
@@ -770,145 +772,175 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                     )}
 
                     {transfers.length > 0 ? (
-                        <div className="space-y-3">
-                            {/* Select All on Page Bar */}
-                            <div className="flex items-center justify-between px-2 pt-1 pb-1 text-xs text-slate-400">
-                                <label className="flex items-center gap-2 cursor-pointer select-none font-medium hover:text-slate-200 transition-colors">
-                                    <input
-                                        type="checkbox"
-                                        checked={isAllPageSelected}
-                                        onChange={handleToggleSelectAll}
-                                        className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                                    />
-                                    <span>Bu Sayfadaki Tümünü Seç ({transfers.length})</span>
-                                </label>
-                                {pagination && pagination.last_page > 1 && (
-                                    <span className="text-[11px] text-slate-500 font-mono">
-                                        Sayfa {pagination.current_page} / {pagination.last_page}
-                                    </span>
-                                )}
-                            </div>
-
-                            <div className="divide-y divide-slate-800/60">
-                                {transfers.map((t) => {
-                                    const isSelected = selectedTransferIds.includes(t.id);
-                                    return (
-                                        <div
-                                            key={t.id}
-                                            className={`py-4 px-3 rounded-2xl transition-all ${
-                                                isSelected
-                                                    ? 'bg-indigo-950/20 border border-indigo-500/30 my-1'
-                                                    : 'hover:bg-slate-800/20'
-                                            } space-y-2.5`}
-                                        >
-                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                                <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs text-slate-300">
+                                    <thead className="bg-slate-950/80 text-[11px] font-semibold uppercase text-slate-400 border-b border-slate-800">
+                                        <tr>
+                                            <th className="px-4 py-3.5">
+                                                <div className="flex items-center gap-3">
                                                     <input
                                                         type="checkbox"
-                                                        checked={isSelected}
-                                                        onChange={() => handleToggleSelect(t.id)}
-                                                        className="mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer flex-shrink-0"
+                                                        checked={isAllPageSelected}
+                                                        onChange={handleToggleSelectAll}
+                                                        title="Bu Sayfadaki Tümünü Seç / Kaldır"
+                                                        className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
                                                     />
-                                                    <div className="space-y-1 min-w-0">
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            <span className="font-mono text-sm font-bold text-white break-all">{t.file_name}</span>
-                                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-                                                                #{t.id}
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                                                            <span>📦 <strong>{t.storage_box_name}</strong></span>
-                                                            <span>📁 Klasör: <code className="text-indigo-300">{t.target_folder}</code></span>
-                                                            <span>⏱ {t.created_at}</span>
-                                                        </div>
-                                                    </div>
+                                                    <span>Dosya Adı & ID</span>
                                                 </div>
+                                            </th>
+                                            <th className="px-4 py-3.5">Storage Box & Klasör</th>
+                                            <th className="px-4 py-3.5">Boyut & İlerleme</th>
+                                            <th className="px-4 py-3.5">Tarih</th>
+                                            <th className="px-4 py-3.5">Durum</th>
+                                            <th className="px-4 py-3.5 text-right">İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/60">
+                                        {transfers.map((t) => {
+                                            const isSelected = selectedTransferIds.includes(t.id);
+                                            return (
+                                                <tr
+                                                    key={t.id}
+                                                    onClick={() => handleToggleSelect(t.id)}
+                                                    className={`hover:bg-slate-800/40 transition-colors cursor-pointer border-b border-slate-800/50 ${
+                                                        isSelected ? 'bg-indigo-950/30' : ''
+                                                    }`}
+                                                >
+                                                    {/* Dosya Adı & ID */}
+                                                    <td className="px-4 py-3.5">
+                                                        <div className="flex items-start gap-3">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isSelected}
+                                                                onChange={() => handleToggleSelect(t.id)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className="mt-0.5 rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer shrink-0"
+                                                            />
+                                                            <div className="space-y-1 min-w-0">
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <span className="font-mono font-bold text-white text-xs md:text-sm break-all">
+                                                                        {t.file_name}
+                                                                    </span>
+                                                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700/50 shrink-0">
+                                                                        #{t.id}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
 
-                                                <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
-                                                    {/* Status Badge */}
-                                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
-                                                        t.status === 'completed'
-                                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                                            : t.status === 'transferring'
-                                                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 animate-pulse'
-                                                            : t.status === 'pending'
-                                                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                                            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                                                    }`}>
-                                                        {t.status === 'completed' && '✓ TAMAMLANDI'}
-                                                        {t.status === 'transferring' && `⚡ AKTARILIYOR (${t.speed_formatted})`}
-                                                        {t.status === 'pending' && '⏳ BEKLİYOR'}
-                                                        {t.status === 'failed' && '✕ HATA'}
-                                                        {t.status === 'cancelled' && 'İPTAL EDİLDİ'}
-                                                    </span>
+                                                    {/* Storage Box & Klasör */}
+                                                    <td className="px-4 py-3.5 whitespace-nowrap">
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center gap-1.5 font-semibold text-slate-200">
+                                                                <span className="text-slate-400 text-xs">📦</span>
+                                                                <span>{t.storage_box_name}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                                                                <span className="text-slate-500">📁</span>
+                                                                <span>Klasör:</span>
+                                                                <code className="text-indigo-300 font-mono">{t.target_folder}</code>
+                                                            </div>
+                                                        </div>
+                                                    </td>
 
-                                                    <button
-                                                        onClick={() => handleCancelTransfer(t.id)}
-                                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 text-xs font-medium transition-all"
-                                                        title={t.status === 'transferring' || t.status === 'pending' ? 'İptal Et' : 'Kayıttan Sil'}
-                                                    >
-                                                        {t.status === 'transferring' || t.status === 'pending' ? 'İptal' : 'Sil'}
-                                                    </button>
-                                                </div>
-                                            </div>
+                                                    {/* Boyut & İlerleme */}
+                                                    <td className="px-4 py-3.5 min-w-[210px]">
+                                                        <div className="space-y-1">
+                                                            <div className="flex justify-between items-center text-[11px] text-slate-300 font-mono">
+                                                                <span>{t.transferred_formatted} / {t.total_formatted}</span>
+                                                                <span className="font-bold text-slate-200">{t.progress_percent.toFixed(1)}%</span>
+                                                            </div>
+                                                            <div className="h-1.5 w-full rounded-full bg-slate-950 overflow-hidden border border-slate-800">
+                                                                <div
+                                                                    className={`h-full transition-all duration-500 rounded-full ${
+                                                                        t.status === 'completed'
+                                                                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                                                            : t.status === 'failed'
+                                                                            ? 'bg-rose-500'
+                                                                            : t.status === 'pending'
+                                                                            ? 'bg-amber-500'
+                                                                            : 'bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 animate-pulse'
+                                                                    }`}
+                                                                    style={{ width: `${Math.max(t.progress_percent, t.status === 'completed' ? 100 : 2)}%` }}
+                                                                />
+                                                            </div>
+                                                            <div className="flex justify-between items-center text-[11px] font-mono">
+                                                                {t.status === 'transferring' && (
+                                                                    <span className="text-blue-400 font-semibold flex items-center gap-1">
+                                                                        <span className="animate-spin inline-block">⚡</span> {t.speed_formatted}
+                                                                    </span>
+                                                                )}
+                                                                {t.error_message && (
+                                                                    <span className="text-rose-400 truncate max-w-[200px]" title={t.error_message}>
+                                                                        {t.error_message}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </td>
 
-                                            {/* Progress Bar & Stats */}
-                                            <div className="space-y-1">
-                                                <div className="h-2 w-full rounded-full bg-slate-950 overflow-hidden border border-slate-800">
-                                                    <div
-                                                        className={`h-full transition-all duration-500 rounded-full ${
+                                                    {/* Tarih */}
+                                                    <td className="px-4 py-3.5 whitespace-nowrap text-slate-400 font-mono text-[11px]">
+                                                        <div className="flex items-center gap-1">
+                                                            <span>⏱</span>
+                                                            <span>{t.created_at}</span>
+                                                        </div>
+                                                    </td>
+
+                                                    {/* Durum Badge */}
+                                                    <td className="px-4 py-3.5 whitespace-nowrap">
+                                                        <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 ${
                                                             t.status === 'completed'
-                                                                ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                                : t.status === 'transferring'
+                                                                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 animate-pulse'
+                                                                : t.status === 'pending'
+                                                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                                                                 : t.status === 'failed'
-                                                                ? 'bg-rose-500'
-                                                                : 'bg-gradient-to-r from-blue-500 to-indigo-500'
-                                                        }`}
-                                                        style={{ width: `${Math.max(t.progress_percent, t.status === 'completed' ? 100 : 2)}%` }}
-                                                    />
-                                                </div>
+                                                                ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                                                        }`}>
+                                                            {t.status === 'completed' && '✓ TAMAMLANDI'}
+                                                            {t.status === 'transferring' && '⚡ AKTARILIYOR'}
+                                                            {t.status === 'pending' && '⏳ BEKLİYOR'}
+                                                            {t.status === 'failed' && '✕ HATA'}
+                                                            {t.status === 'cancelled' && 'İPTAL EDİLDİ'}
+                                                        </span>
+                                                    </td>
 
-                                                <div className="flex justify-between items-center text-[11px] text-slate-400 font-mono">
-                                                    <span>
-                                                        {t.transferred_formatted} / {t.total_formatted} ({t.progress_percent.toFixed(1)}%)
-                                                    </span>
-                                                    {t.error_message && (
-                                                        <span className="text-rose-400 truncate max-w-md">{t.error_message}</span>
-                                                    )}
-                                                    {t.status === 'transferring' && (
-                                                        <span className="text-blue-400 font-semibold">{t.speed_formatted}</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                                                    {/* İşlemler */}
+                                                    <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleCancelTransfer(t.id);
+                                                            }}
+                                                            className="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700/60 text-xs font-semibold transition-all"
+                                                            title={t.status === 'transferring' || t.status === 'pending' ? 'İptal Et' : 'Kayıttan Sil'}
+                                                        >
+                                                            {t.status === 'transferring' || t.status === 'pending' ? 'İptal' : 'Sil'}
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
                             </div>
 
-                            {/* Pagination Controls */}
+                            {/* Pagination Controls Footer */}
                             {pagination && pagination.total > 0 && (
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-slate-800">
-                                    <div className="flex items-center gap-3 flex-wrap">
-                                        <div className="text-xs text-slate-400">
+                                <div className="p-4 border-t border-slate-800 bg-slate-950/40 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+                                    <div className="flex items-center gap-3 flex-wrap text-slate-400">
+                                        <div>
                                             Toplam <strong className="text-white">{pagination.total}</strong> aktarımdan{' '}
                                             <strong className="text-white">
                                                 {(pagination.current_page - 1) * pagination.per_page + 1} - {Math.min(pagination.current_page * pagination.per_page, pagination.total)}
                                             </strong>{' '}
                                             arası gösteriliyor
-                                        </div>
-
-                                        <div className="flex items-center gap-1.5 text-xs text-slate-400 border-l border-slate-800 pl-3">
-                                            <span className="font-medium text-slate-400">Sayfa Başı:</span>
-                                            <select
-                                                value={perPage}
-                                                onChange={(e) => handlePerPageChange(Number(e.target.value))}
-                                                className="rounded-lg bg-slate-800 border-slate-700 text-slate-200 text-xs py-0.5 px-2 font-semibold focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
-                                            >
-                                                <option value={10}>10 Adet</option>
-                                                <option value={25}>25 Adet</option>
-                                                <option value={50}>50 Adet</option>
-                                                <option value={100}>100 Adet</option>
-                                                <option value={250}>250 Adet</option>
-                                            </select>
                                         </div>
                                     </div>
 
@@ -934,14 +966,14 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                                 .reduce((acc, page, idx, arr) => {
                                                     if (idx > 0 && page - arr[idx - 1] > 1) {
                                                         acc.push({ type: 'ellipsis', key: `el-${page}` });
-                                                    }
+                                                     }
                                                     acc.push({ type: 'page', number: page, key: page });
                                                     return acc;
                                                 }, [])
                                                 .map(item => {
                                                     if (item.type === 'ellipsis') {
                                                         return (
-                                                            <span key={item.key} className="px-2 text-slate-600 text-xs">
+                                                            <span key={item.key} className="px-2 text-slate-600 text-xs font-mono">
                                                                 ...
                                                             </span>
                                                         );
@@ -976,10 +1008,10 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                     )}
                                 </div>
                             )}
-                        </div>
+                        </>
                     ) : (
-                        <div className="rounded-2xl bg-slate-950/40 border border-slate-800/80 p-8 text-center text-slate-400 text-xs">
-                            Şu anda aktif veya geçmiş bir uzaktan dosya aktarımı bulunmuyor. Yukarıdaki <strong>"+ URL'den İndir & Yükle"</strong> butonuna tıklayarak doğrudan film veya dizi indirebilirsiniz.
+                        <div className="p-12 text-center text-slate-400 text-xs">
+                            Şu anda aktif veya geçmiş bir uzaktan dosya aktarımı bulunmuyor. Yukarıdaki <strong>"+ Yeni Link Ekle"</strong> butonuna tıklayarak doğrudan film veya dizi indirebilirsiniz.
                         </div>
                     )}
                 </div>
