@@ -133,6 +133,17 @@ add_to_cache() {
     fi
 }
 
+# Önbelleği Temizleme
+clear_cache() {
+    if [ -f "$CACHE_FILE" ]; then
+        rm -f "$CACHE_FILE"
+        touch "$CACHE_FILE" 2>/dev/null || true
+        echo -e "${GREEN}[+] Önbellek kaydı başarıyla temizlendi: ${CACHE_FILE}${NC}"
+    else
+        echo -e "${YELLOW}[!] Temizlenecek önbellek dosyası bulunamadı.${NC}"
+    fi
+}
+
 # Parametre Ayrıştırma (CLI Üzerinden Verilmişse)
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -146,7 +157,7 @@ parse_args() {
             --dir|--remote-dir) REMOTE_DIR="$2"; shift 2 ;;
             --dry-run) DRY_RUN=true; shift ;;
             --tmdb-key) TMDB_API_KEY="$2"; shift 2 ;;
-            --clear-cache) [ -f "$CACHE_FILE" ] && rm -f "$CACHE_FILE"; echo -e "${GREEN}[+] Önbellek temizlendi.${NC}"; shift ;;
+            --clear-cache) clear_cache; exit 0 ;;
             *) shift ;;
         esac
     done
@@ -161,11 +172,23 @@ interactive_setup() {
         echo "  [1] WebDAV Sunucusu (Hetzner Storage Box, Nextcloud, ownCloud vb.)"
         echo "  [2] FTP / FTPS Sunucusu"
         echo "  [3] Yerel Dizin / Mount Alanı"
+        echo "  [4] 🧹 Önbelleği Temizle (Tüm İşlem Önbelleğini Sıfırla)"
         echo ""
-        read_tty "Seçiminiz (1-3) [Varsayılan: 1]: " choice
+        read_tty "Seçiminiz (1-4) [Varsayılan: 1]: " choice
         case "$choice" in
             2) PROTOCOL="ftp" ;;
             3) PROTOCOL="local" ;;
+            4) 
+                clear_cache
+                echo ""
+                read_tty "Yeniden adlandırma işlemine devam etmek istiyor musunuz [E/h]? " continue_choice
+                case "$continue_choice" in
+                    [hH]|hayir|Hayir) exit 0 ;;
+                esac
+                PROTOCOL=""
+                interactive_setup
+                return
+                ;;
             *) PROTOCOL="webdav" ;;
         esac
     fi
@@ -183,7 +206,7 @@ interactive_setup() {
             if [ -z "$REMOTE_PASS" ]; then
                 read_tty "Şifre: " REMOTE_PASS true
             fi
-            if [ "$REMOTE_DIR" =="/" ]; then
+            if [ "$REMOTE_DIR" = "/" ]; then
                 read_tty "Hedef Klasör Yolu (Örn: /film veya /) [Varsayılan: /]: " input_dir
                 REMOTE_DIR="${input_dir:-/}"
             fi
@@ -217,6 +240,12 @@ interactive_setup() {
                 REMOTE_DIR="$input_dir"
             fi
             ;;
+    esac
+
+    echo ""
+    read_tty "Mevcut işlem önbelleği temizlensin mi (Tüm dosyalar sıfırdan taransın) [e/H]? " clear_choice
+    case "$clear_choice" in
+        [eE]|[yY]|evet|Evet) clear_cache ;;
     esac
 
     echo ""
