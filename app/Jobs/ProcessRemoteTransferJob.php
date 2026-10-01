@@ -19,7 +19,7 @@ class ProcessRemoteTransferJob implements ShouldQueue
     public function __construct(
         public RemoteTransfer $transfer
     ) {
-        $this->onQueue('transfers');
+        $this->onQueue('file_transfers');
     }
 
     public function handle(RemoteTransferService $transferService): void

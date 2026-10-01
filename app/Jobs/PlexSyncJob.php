@@ -14,7 +14,7 @@ class PlexSyncJob implements ShouldQueue
 
     public function __construct()
     {
-        $this->onQueue('sync');
+        $this->onQueue('plex_sync');
     }
 
     public function handle(PlexService $plexService, PlexUsageService $plexUsageService): void

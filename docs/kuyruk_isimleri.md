@@ -8,9 +8,9 @@ Bu belgede, MedyaHub uygulamasındaki arka plan görevlerinin (Queue Jobs) hangi
 
 | Kuyruk İsmi | Açıklama | Bağlı Job Sınıfı | Çalışma Durumu / Tetiklenme |
 | :--- | :--- | :--- | :--- |
-| **`scans`** | Storage Box Dosya Taramaları | `App\Jobs\MediaScanJob` | Kullanıcı butonla başlattığında veya 5 dk'da bir zamanlandığında |
-| **`transfers`** | URL'den Uzaktan Dosya İndirmeleri | `App\Jobs\ProcessRemoteTransferJob` | URL'den indirme başlatıldığında |
-| **`sync`** | Plex Oturum & Kullanıcı Senkronizasyonu | `App\Jobs\PlexSyncJob` | 30 saniyede bir zamanlandığında |
+| **`disk_scans`** | Storage Box Dosya Taramaları | `App\Jobs\MediaScanJob` | Kullanıcı butonla başlattığında veya 5 dk'da bir zamanlandığında |
+| **`file_transfers`** | URL'den Uzaktan Dosya İndirmeleri | `App\Jobs\ProcessRemoteTransferJob` | URL'den indirme başlatıldığında |
+| **`plex_sync`** | Plex Oturum & Kullanıcı Senkronizasyonu | `App\Jobs\PlexSyncJob` | 30 saniyede bir zamanlandığında |
 | **`default`** | Genel İşlemler & Kota Sıfırlamaları | `App\Jobs\QuotaResetJob` | Kota süreleri dolduğunda veya varsayılan işlerde |
 
 ---
@@ -19,9 +19,9 @@ Bu belgede, MedyaHub uygulamasındaki arka plan görevlerinin (Queue Jobs) hangi
 
 Plesk paneli **Laravel Toolkit > Kuyruk** sekmesinde aşağıdaki isimlerle sırayla işleyici (worker) ekleyebilirsiniz:
 
-1. **`scans`** kuyruğu oluşturun *(Dosya taramalarının bağımsız çalışması için)*
-2. **`transfers`** kuyruğu oluşturun *(İndirmelerin taramaları engellememesi için)*
-3. **`sync`** kuyruğu oluşturun *(Plex senkronizasyonlarının aksamaması için)*
+1. **`disk_scans`** kuyruğu oluşturun *(Dosya taramalarının bağımsız çalışması için)*
+2. **`file_transfers`** kuyruğu oluşturun *(İndirmelerin taramaları engellememesi için)*
+3. **`plex_sync`** kuyruğu oluşturun *(Plex senkronizasyonlarının aksamaması için)*
 4. **`default`** kuyruğu oluşturun *(Genel Laravel sistem işleri için)*
 
 ---
@@ -29,6 +29,6 @@ Plesk paneli **Laravel Toolkit > Kuyruk** sekmesinde aşağıdaki isimlerle sır
 ### 💡 Alternatif Tek İşleyici Komutu
 Eğer tüm kuyrukları tek bir işleyici üzerinden çalıştırmak isterseniz komut satırından:
 ```bash
-php artisan queue:work --queue=transfers,scans,sync,default
+php artisan queue:work --queue=file_transfers,disk_scans,plex_sync,default
 ```
 komutunu kullanabilirsiniz.

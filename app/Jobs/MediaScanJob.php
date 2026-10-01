@@ -20,7 +20,7 @@ class MediaScanJob implements ShouldQueue
      */
     public function __construct(public ?int $mediaScanId = null)
     {
-        $this->onQueue('scans');
+        $this->onQueue('disk_scans');
     }
 
     /**
