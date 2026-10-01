@@ -271,6 +271,55 @@ extract_season_episode() {
     echo ""
 }
 
+# Sezon Klasörü İsmi Oluşturma (Örn: Sezon 01)
+extract_season_folder() {
+    local filename="$1"
+    local se_tag=$(extract_season_episode "$filename")
+    if [ -n "$se_tag" ]; then
+        local s_num=$(echo "$se_tag" | grep -oE '^S[0-9]+' | sed 's/S//')
+        if [ -n "$s_num" ]; then
+            printf "Sezon %02d" "$((10#$s_num))"
+            return
+        fi
+    fi
+    echo ""
+}
+
+# Dizi Klasör Hiyerarşisini Hesaplama (Dizi İsmi / Sezon XX)
+compute_target_dir() {
+    local current_dir_path="$1"   # e.g. /Diziler
+    local sanitized_title="$2"    # e.g. LEGO.Ninjago.Dragons.Rising
+    local season_folder_name="$3" # e.g. Sezon 01
+
+    local current_dir_name=$(basename "$current_dir_path")
+
+    # 1. Eğer dosya zaten bir Sezon klasörünün içindeyse
+    if echo "$current_dir_name" | grep -iqE '^(sezon|season|s)[ ._-]*[0-9]{1,2}$'; then
+        echo "$current_dir_path"
+        return
+    fi
+
+    local norm_curr=$(echo "$current_dir_name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
+    local norm_title=$(echo "$sanitized_title" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
+
+    # 2. Eğer dosya doğrudan Dizi klasörünün içindeyse (ama Sezon klasörü yoksa)
+    if [ -n "$norm_curr" ] && [ "$norm_curr" = "$norm_title" ]; then
+        if [ -n "$season_folder_name" ]; then
+            echo "${current_dir_path}/${season_folder_name}"
+        else
+            echo "$current_dir_path"
+        fi
+        return
+    fi
+
+    # 3. Eğer dosya ana dizindeyse (örn: /Diziler altında)
+    if [ -n "$season_folder_name" ]; then
+        echo "${current_dir_path}/${sanitized_title}/${season_folder_name}"
+    else
+        echo "${current_dir_path}/${sanitized_title}"
+    fi
+}
+
 # Ses Etiketini Tespit Etme (DUAL / TR / TR_Altyazili)
 detect_audio_tag() {
     local full_target="$1" # Uzak URL veya yerel dosya yolu
@@ -789,27 +838,60 @@ process_webdav() {
         local file_name=$(basename "$raw_href")
         local dir_path=$(dirname "$raw_href")
         
-        # ffprobe için tam HTTP URL oluştur (HTTP Range sorgusu ile uzaktan ses dili tespiti)
+        # ffprobe için tam HTTP URL oluştur
         local scheme=$(echo "$base_url" | grep -oE '^(https?://)')
         local host_part=${base_url#$scheme}
         local probe_url="${scheme}${REMOTE_USER}:${REMOTE_PASS}@${host_part}${raw_href}"
 
         local new_name=$(compute_new_filename "$file_name" "$probe_url")
+        local final_name="${new_name:-$file_name}"
 
-        if [ -n "$new_name" ]; then
-            local old_full_url="${base_url}${raw_href}"
-            local new_full_url="${base_url}${dir_path}/${new_name}"
+        # Dizi hiyerarşisi hesaplama
+        local media_type=$(detect_media_type "$dir_path" "$file_name")
+        local target_dir_path="$dir_path"
 
-            if [ "$DRY_RUN" = true ]; then
-                echo -e "${CYAN}[SIMULATION WebDAV MOVE]:${NC} $file_name -> $new_name"
+        if [ "$media_type" = "series" ]; then
+            local search_info=$(clean_search_title "$file_name")
+            local parsed_title=$(echo "$search_info" | cut -d'|' -f1)
+            local parsed_year=$(echo "$search_info" | cut -d'|' -f2)
+            local tmdb_res=$(query_tmdb "$parsed_title" "$parsed_year" "$media_type")
+            local tmdb_t=""
+            if [ -n "$tmdb_res" ]; then tmdb_t=$(echo "$tmdb_res" | cut -d'|' -f1); fi
+            local san_title=$(sanitize_title "${tmdb_t:-$parsed_title}")
+            local seas_folder=$(extract_season_folder "$file_name")
+
+            if [ -n "$san_title" ]; then
+                target_dir_path=$(compute_target_dir "$dir_path" "$san_title" "$seas_folder")
+            fi
+        fi
+
+        local old_full_url="${base_url}${raw_href}"
+        local new_full_url="${base_url}${target_dir_path}/${final_name}"
+        new_full_url=$(echo "$new_full_url" | sed -E 's#//+#/#g' | sed -E 's#http:/#http://#g' | sed -E 's#https:/#https://#g')
+
+        if [ "$old_full_url" = "$new_full_url" ]; then continue; fi
+
+        if [ "$DRY_RUN" = true ]; then
+            echo -e "${CYAN}[SIMULATION WebDAV MOVE & RENAME]:${NC} $file_name -> ${target_dir_path}/${final_name}"
+        else
+            # WebDAV üzerinde klasör hiyerarşisini oluştur (MKCOL)
+            if [ "$dir_path" != "$target_dir_path" ]; then
+                local relative_target="${target_dir_path#/}"
+                IFS='/' read -ra PARTS <<< "$relative_target"
+                local curr_build=""
+                for part in "${PARTS[@]}"; do
+                    if [ -z "$part" ]; then continue; fi
+                    curr_build="${curr_build}/${part}"
+                    curl -s -k -o /dev/null -u "${REMOTE_USER}:${REMOTE_PASS}" -X MKCOL "${base_url}${curr_build}" || true
+                done
+            fi
+
+            echo -n "WebDAV MOVE yapılıyor... "
+            local http_code=$(curl -s -k -o /dev/null -w "%{http_code}" -u "${REMOTE_USER}:${REMOTE_PASS}" -X MOVE -H "Destination: ${new_full_url}" "${old_full_url}")
+            if [[ "$http_code" =~ ^(201|204|200)$ ]]; then
+                echo -e "${GREEN}✓ BAŞARILI${NC}"
             else
-                echo -n "WebDAV MOVE yapılıyor... "
-                local http_code=$(curl -s -k -o /dev/null -w "%{http_code}" -u "${REMOTE_USER}:${REMOTE_PASS}" -X MOVE -H "Destination: ${new_full_url}" "${old_full_url}")
-                if [[ "$http_code" =~ ^(201|204|200)$ ]]; then
-                    echo -e "${GREEN}✓ BAŞARILI${NC}"
-                else
-                    echo -e "${RED}HATA (HTTP $http_code)${NC}"
-                fi
+                echo -e "${RED}HATA (HTTP $http_code)${NC}"
             fi
         fi
     done
@@ -907,22 +989,54 @@ process_ftp() {
 
         local probe_url="ftp://${REMOTE_USER}:${REMOTE_PASS}@${REMOTE_HOST}:${REMOTE_PORT}${rel_path}"
         local new_name=$(compute_new_filename "$file_name" "$probe_url")
+        local final_name="${new_name:-$file_name}"
 
-        if [ -n "$new_name" ]; then
-            local old_path="${rel_path}"
-            old_path=$(echo "$old_path" | sed -E 's#//+#/#g')
-            local new_path="${dir_path}/${new_name}"
-            new_path=$(echo "$new_path" | sed -E 's#//+#/#g')
+        # Dizi hiyerarşisi hesaplama
+        local media_type=$(detect_media_type "$dir_path" "$file_name")
+        local target_dir_path="$dir_path"
 
-            if [ "$DRY_RUN" = true ]; then
-                echo -e "${CYAN}[SIMULATION FTP RNFR/RNTO]:${NC} $file_name -> $new_name"
-            else
-                echo -n "FTP Yeniden Adlandırılıyor... "
-                curl -s --user "${REMOTE_USER}:${REMOTE_PASS}" "ftp://${REMOTE_HOST}:${REMOTE_PORT}/" \
-                    -Q "RNFR ${old_path}" \
-                    -Q "RNTO ${new_path}" > /dev/null
-                echo -e "${GREEN}✓ BAŞARILI${NC}"
+        if [ "$media_type" = "series" ]; then
+            local search_info=$(clean_search_title "$file_name")
+            local parsed_title=$(echo "$search_info" | cut -d'|' -f1)
+            local parsed_year=$(echo "$search_info" | cut -d'|' -f2)
+            local tmdb_res=$(query_tmdb "$parsed_title" "$parsed_year" "$media_type")
+            local tmdb_t=""
+            if [ -n "$tmdb_res" ]; then tmdb_t=$(echo "$tmdb_res" | cut -d'|' -f1); fi
+            local san_title=$(sanitize_title "${tmdb_t:-$parsed_title}")
+            local seas_folder=$(extract_season_folder "$file_name")
+
+            if [ -n "$san_title" ]; then
+                target_dir_path=$(compute_target_dir "$dir_path" "$san_title" "$seas_folder")
             fi
+        fi
+
+        local old_path="${rel_path}"
+        old_path=$(echo "$old_path" | sed -E 's#//+#/#g')
+        local new_path="${target_dir_path}/${final_name}"
+        new_path=$(echo "$new_path" | sed -E 's#//+#/#g')
+
+        if [ "$old_path" = "$new_path" ]; then continue; fi
+
+        if [ "$DRY_RUN" = true ]; then
+            echo -e "${CYAN}[SIMULATION FTP MOVE & RENAME]:${NC} $file_name -> ${target_dir_path}/${final_name}"
+        else
+            # FTP üzerinde klasör hiyerarşisini oluştur (MKD)
+            if [ "$dir_path" != "$target_dir_path" ]; then
+                local relative_target="${target_dir_path#/}"
+                IFS='/' read -ra PARTS <<< "$relative_target"
+                local curr_build=""
+                for part in "${PARTS[@]}"; do
+                    if [ -z "$part" ]; then continue; fi
+                    curr_build="${curr_build}/${part}"
+                    curl -s --user "${REMOTE_USER}:${REMOTE_PASS}" "ftp://${REMOTE_HOST}:${REMOTE_PORT}/" -Q "MKD ${curr_build}" > /dev/null 2>&1 || true
+                done
+            fi
+
+            echo -n "FTP Taşıma & Yeniden Adlandırılıyor... "
+            curl -s --user "${REMOTE_USER}:${REMOTE_PASS}" "ftp://${REMOTE_HOST}:${REMOTE_PORT}/" \
+                -Q "RNFR ${old_path}" \
+                -Q "RNTO ${new_path}" > /dev/null
+            echo -e "${GREEN}✓ BAŞARILI${NC}"
         fi
     done
 }
@@ -943,19 +1057,40 @@ process_local() {
         local dir_name=$(dirname "$file_path")
         
         local new_name=$(compute_new_filename "$file_path" "$file_path")
+        local final_name="${new_name:-$file_name}"
 
-        if [ -n "$new_name" ]; then
-            local target_filepath="${dir_name}/${new_name}"
+        # Dizi hiyerarşisi hesaplama
+        local media_type=$(detect_media_type "$dir_name" "$file_name")
+        local target_dir_path="$dir_name"
 
-            if [ "$DRY_RUN" = true ]; then
-                echo -e "${CYAN}[SIMULATION Yerel Rename]:${NC} $file_name -> $new_name"
+        if [ "$media_type" = "series" ]; then
+            local search_info=$(clean_search_title "$file_name")
+            local parsed_title=$(echo "$search_info" | cut -d'|' -f1)
+            local parsed_year=$(echo "$search_info" | cut -d'|' -f2)
+            local tmdb_res=$(query_tmdb "$parsed_title" "$parsed_year" "$media_type")
+            local tmdb_t=""
+            if [ -n "$tmdb_res" ]; then tmdb_t=$(echo "$tmdb_res" | cut -d'|' -f1); fi
+            local san_title=$(sanitize_title "${tmdb_t:-$parsed_title}")
+            local seas_folder=$(extract_season_folder "$file_name")
+
+            if [ -n "$san_title" ]; then
+                target_dir_path=$(compute_target_dir "$dir_name" "$san_title" "$seas_folder")
+            fi
+        fi
+
+        local target_filepath="${target_dir_path}/${final_name}"
+
+        if [ "$file_path" = "$target_filepath" ]; then continue; fi
+
+        if [ "$DRY_RUN" = true ]; then
+            echo -e "${CYAN}[SIMULATION Yerel MOVE & RENAME]:${NC} $file_name -> ${target_dir_path}/${final_name}"
+        else
+            mkdir -p "$target_dir_path"
+            if [ -f "$target_filepath" ] && [ "$file_path" != "$target_filepath" ]; then
+                echo -e "${RED}Hata: Hedef dosya zaten mevcut: $final_name${NC}"
             else
-                if [ -f "$target_filepath" ]; then
-                    echo -e "${RED}Hata: Hedef dosya zaten mevcut: $new_name${NC}"
-                else
-                    mv "$file_path" "$target_filepath"
-                    echo -e "${GREEN}✓ BAŞARIYLA YENİDEN ADLANDIRILDI${NC}"
-                fi
+                mv "$file_path" "$target_filepath"
+                echo -e "${GREEN}✓ BAŞARIYLA TAŞINDI VE YENİDEN ADLANDIRILDI${NC}"
             fi
         fi
     done
