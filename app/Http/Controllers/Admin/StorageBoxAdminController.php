@@ -29,7 +29,7 @@ class StorageBoxAdminController extends Controller
         protected RemoteTransferService $remoteTransferService,
     ) {}
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $rawBoxes = StorageBox::withCount('media')
             ->withSum('media', 'file_size')
@@ -149,9 +149,11 @@ class StorageBoxAdminController extends Controller
             'total_boxes_count' => $rawBoxes->count(),
         ];
 
+        $perPage = max(1, min(500, (int) $request->input('per_page', 10)));
+
         $paginatedTransfers = RemoteTransfer::with('storageBox')
             ->latest()
-            ->paginate(10);
+            ->paginate($perPage);
 
         $statusCounts = [
             'completed' => RemoteTransfer::where('status', 'completed')->count(),
@@ -809,15 +811,17 @@ class StorageBoxAdminController extends Controller
 
         $relativePath = ($folder ? $folder.'/' : '').$fileName;
 
-        // Check if identical file with same name and same size already exists
-        $existingSize = ($totalBytes > 0)
-            ? $this->remoteTransferService->getExistingFileMatchingSize($storageBox, $folder, $fileName, $totalBytes)
-            : null;
+        // Check if identical file with same name and same size already exists on ANY storage box in the system
+        $existingMatch = $this->remoteTransferService->findExistingFileAcrossAllBoxes($fileName, $totalBytes, $folder);
 
-        if ($existingSize !== null) {
+        if ($existingMatch !== null) {
+            $foundBox = $existingMatch['box'];
+            $matchedSize = $existingMatch['size'];
+            $totalBytes = $totalBytes > 0 ? $totalBytes : $matchedSize;
             $autoAdd = $request->boolean('auto_add_media', true);
+
             $transfer = RemoteTransfer::create([
-                'storage_box_id' => $storageBox->id,
+                'storage_box_id' => $foundBox->id,
                 'source_url' => $validated['source_url'],
                 'target_folder' => $folder ?: 'Filmler',
                 'file_name' => $fileName,
@@ -828,11 +832,11 @@ class StorageBoxAdminController extends Controller
                 'speed_bps' => 0,
                 'status' => 'completed',
                 'auto_add_media' => $autoAdd,
-                'error_message' => 'Dosya hedef Storage Box üzerinde aynı isim ve boyutta zaten mevcut. Yeniden aktarılmadı.',
+                'error_message' => "Dosya sistemdeki '{$foundBox->name}' Storage Box üzerinde aynı isim ve boyutta zaten mevcut. Yeniden aktarılmadı.",
             ]);
 
             if ($autoAdd) {
-                $this->remoteTransferService->registerMedia($transfer, $storageBox);
+                $this->remoteTransferService->registerMedia($transfer, $foundBox);
             }
 
             $this->auditLogService->log(
@@ -843,9 +847,10 @@ class StorageBoxAdminController extends Controller
             );
 
             return back()->with('message', sprintf(
-                '"%s" adlı dosya (%s) hedef depolama alanında aynı boyutta zaten mevcut olduğu için doğrudan yüklendi olarak işaretlendi.',
+                '"%s" adlı dosya (%s) sistemdeki "%s" depolama alanında aynı boyutta zaten mevcut olduğu için direkt yüklendi olarak işaretlendi.',
                 $fileName,
-                $this->remoteTransferService->formatBytes($totalBytes)
+                $this->remoteTransferService->formatBytes($totalBytes),
+                $foundBox->name
             ));
         }
 
@@ -932,7 +937,8 @@ class StorageBoxAdminController extends Controller
             $this->remoteTransferService->processQueue();
         }
 
-        $perPage = (int) $request->input('per_page', 10);
+        $perPage = max(1, min(500, (int) $request->input('per_page', 10)));
+
         $paginated = RemoteTransfer::with('storageBox')
             ->latest()
             ->paginate($perPage);

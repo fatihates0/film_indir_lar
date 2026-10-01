@@ -34,6 +34,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
     const [pagination, setPagination] = useState(initialPagination);
     const [statusCounts, setStatusCounts] = useState(initialStatusCounts);
     const [currentPage, setCurrentPage] = useState(initialPagination.current_page || 1);
+    const [perPage, setPerPage] = useState(initialPagination.per_page || 10);
     const [selectedTransferIds, setSelectedTransferIds] = useState([]);
     const [isBulkDeleting, setIsBulkDeleting] = useState(false);
     const [probing, setProbing] = useState(false);
@@ -91,9 +92,9 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
         size_mb: 50,
     });
 
-    const fetchTransfers = (page = currentPage) => {
+    const fetchTransfers = (page = currentPage, currentPerPage = perPage) => {
         axios.get(route('admin.storage-boxes.transfers'), {
-            params: { page, per_page: 10 }
+            params: { page, per_page: currentPerPage }
         }).then(res => {
             if (res.data?.transfers) {
                 setTransfers(res.data.transfers);
@@ -113,11 +114,11 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
         if (!hasActive) return;
 
         const interval = setInterval(() => {
-            fetchTransfers(currentPage);
+            fetchTransfers(currentPage, perPage);
         }, 2500);
 
         return () => clearInterval(interval);
-    }, [transfers, currentPage]);
+    }, [transfers, currentPage, perPage]);
 
     const handleProbeUrl = async () => {
         if (!remoteForm.data.source_url) return;
@@ -284,7 +285,13 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
     const handlePageChange = (newPage) => {
         if (newPage < 1 || newPage > (pagination?.last_page || 1) || newPage === currentPage) return;
         setCurrentPage(newPage);
-        fetchTransfers(newPage);
+        fetchTransfers(newPage, perPage);
+    };
+
+    const handlePerPageChange = (newPerPage) => {
+        setPerPage(newPerPage);
+        setCurrentPage(1);
+        fetchTransfers(1, newPerPage);
     };
 
     const openRemoteModalForBox = (box) => {
@@ -674,6 +681,21 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                         </div>
 
                         <div className="flex items-center gap-2 self-start flex-wrap">
+                            <div className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800/90 border border-slate-700/80 px-3 py-1.5 text-xs text-slate-300">
+                                <span className="font-medium text-slate-400">Sayfa Başı:</span>
+                                <select
+                                    value={perPage}
+                                    onChange={(e) => handlePerPageChange(Number(e.target.value))}
+                                    className="rounded-lg bg-slate-900 border-slate-700 text-slate-200 text-xs py-0.5 px-2 font-semibold focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
+                                >
+                                    <option value={10}>10 Adet</option>
+                                    <option value={25}>25 Adet</option>
+                                    <option value={50}>50 Adet</option>
+                                    <option value={100}>100 Adet</option>
+                                    <option value={250}>250 Adet</option>
+                                </select>
+                            </div>
+
                             {transfers.some(t => ['completed', 'failed', 'cancelled'].includes(t.status)) && (
                                 <button
                                     type="button"
@@ -863,76 +885,95 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                             </div>
 
                             {/* Pagination Controls */}
-                            {pagination && pagination.last_page > 1 && (
+                            {pagination && pagination.total > 0 && (
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-slate-800">
-                                    <div className="text-xs text-slate-400">
-                                        Toplam <strong className="text-white">{pagination.total}</strong> aktarımdan{' '}
-                                        <strong className="text-white">
-                                            {(pagination.current_page - 1) * pagination.per_page + 1} - {Math.min(pagination.current_page * pagination.per_page, pagination.total)}
-                                        </strong>{' '}
-                                        arası gösteriliyor
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        <div className="text-xs text-slate-400">
+                                            Toplam <strong className="text-white">{pagination.total}</strong> aktarımdan{' '}
+                                            <strong className="text-white">
+                                                {(pagination.current_page - 1) * pagination.per_page + 1} - {Math.min(pagination.current_page * pagination.per_page, pagination.total)}
+                                            </strong>{' '}
+                                            arası gösteriliyor
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 text-xs text-slate-400 border-l border-slate-800 pl-3">
+                                            <span className="font-medium text-slate-400">Sayfa Başı:</span>
+                                            <select
+                                                value={perPage}
+                                                onChange={(e) => handlePerPageChange(Number(e.target.value))}
+                                                className="rounded-lg bg-slate-800 border-slate-700 text-slate-200 text-xs py-0.5 px-2 font-semibold focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer"
+                                            >
+                                                <option value={10}>10 Adet</option>
+                                                <option value={25}>25 Adet</option>
+                                                <option value={50}>50 Adet</option>
+                                                <option value={100}>100 Adet</option>
+                                                <option value={250}>250 Adet</option>
+                                            </select>
+                                        </div>
                                     </div>
 
-                                    <div className="flex items-center gap-1.5 self-center sm:self-auto">
-                                        <button
-                                            type="button"
-                                            onClick={() => handlePageChange(pagination.current_page - 1)}
-                                            disabled={pagination.current_page <= 1}
-                                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                                        >
-                                            ← Önceki
-                                        </button>
+                                    {pagination.last_page > 1 && (
+                                        <div className="flex items-center gap-1.5 self-center sm:self-auto">
+                                            <button
+                                                type="button"
+                                                onClick={() => handlePageChange(pagination.current_page - 1)}
+                                                disabled={pagination.current_page <= 1}
+                                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                                            >
+                                                ← Önceki
+                                            </button>
 
-                                        {Array.from({ length: pagination.last_page }, (_, i) => i + 1)
-                                            .filter(page => {
-                                                return (
-                                                    page === 1 ||
-                                                    page === pagination.last_page ||
-                                                    Math.abs(page - pagination.current_page) <= 2
-                                                );
-                                            })
-                                            .reduce((acc, page, idx, arr) => {
-                                                if (idx > 0 && page - arr[idx - 1] > 1) {
-                                                    acc.push({ type: 'ellipsis', key: `el-${page}` });
-                                                }
-                                                acc.push({ type: 'page', number: page, key: page });
-                                                return acc;
-                                            }, [])
-                                            .map(item => {
-                                                if (item.type === 'ellipsis') {
+                                            {Array.from({ length: pagination.last_page }, (_, i) => i + 1)
+                                                .filter(page => {
                                                     return (
-                                                        <span key={item.key} className="px-2 text-slate-600 text-xs">
-                                                            ...
-                                                        </span>
+                                                        page === 1 ||
+                                                        page === pagination.last_page ||
+                                                        Math.abs(page - pagination.current_page) <= 2
                                                     );
-                                                }
-                                                const isCurrent = item.number === pagination.current_page;
-                                                return (
-                                                    <button
-                                                        key={item.key}
-                                                        type="button"
-                                                        onClick={() => handlePageChange(item.number)}
-                                                        className={`min-w-[32px] h-8 rounded-xl text-xs font-semibold transition-all ${
-                                                            isCurrent
-                                                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                                                                : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300'
-                                                        }`}
-                                                    >
-                                                        {item.number}
-                                                    </button>
-                                                );
-                                            })
-                                        }
+                                                })
+                                                .reduce((acc, page, idx, arr) => {
+                                                    if (idx > 0 && page - arr[idx - 1] > 1) {
+                                                        acc.push({ type: 'ellipsis', key: `el-${page}` });
+                                                    }
+                                                    acc.push({ type: 'page', number: page, key: page });
+                                                    return acc;
+                                                }, [])
+                                                .map(item => {
+                                                    if (item.type === 'ellipsis') {
+                                                        return (
+                                                            <span key={item.key} className="px-2 text-slate-600 text-xs">
+                                                                ...
+                                                            </span>
+                                                        );
+                                                    }
+                                                    const isCurrent = item.number === pagination.current_page;
+                                                    return (
+                                                        <button
+                                                            key={item.key}
+                                                            type="button"
+                                                            onClick={() => handlePageChange(item.number)}
+                                                            className={`min-w-[32px] h-8 rounded-xl text-xs font-semibold transition-all ${
+                                                                isCurrent
+                                                                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                                                                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300'
+                                                            }`}
+                                                        >
+                                                            {item.number}
+                                                        </button>
+                                                    );
+                                                })
+                                            }
 
-                                        <button
-                                            type="button"
-                                            onClick={() => handlePageChange(pagination.current_page + 1)}
-                                            disabled={pagination.current_page >= pagination.last_page}
-                                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                                        >
-                                            Sonraki →
-                                        </button>
-                                    </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handlePageChange(pagination.current_page + 1)}
+                                                disabled={pagination.current_page >= pagination.last_page}
+                                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                                            >
+                                                Sonraki →
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

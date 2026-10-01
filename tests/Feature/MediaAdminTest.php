@@ -1,7 +1,10 @@
 <?php
 
+use App\Enums\UserRole;
 use App\Models\Media;
+use App\Models\StorageBox;
 use App\Models\User;
+use App\Services\StorageBoxService;
 
 test('admin can delete an entire season for a TV series', function () {
     $admin = User::factory()->create(['role' => 'admin']);
@@ -136,4 +139,61 @@ test('admin can clear entire archive in bulk', function () {
 
     $response->assertRedirect();
     expect(Media::count())->toBe(0);
+});
+
+test('admin can generate bulk download links for selected media items', function () {
+    $admin = User::factory()->create(['role' => UserRole::ADMIN]);
+
+    $box = StorageBox::create([
+        'name' => 'Test Box',
+        'slug' => 'test-box',
+        'host' => '127.0.0.1',
+        'username' => 'test',
+        'password' => 'secret',
+        'storage_path' => '/home/test',
+        'mount_path' => '/mnt/test',
+        'is_active' => true,
+        'status' => 'online',
+    ]);
+
+    $m1 = Media::create([
+        'storage_box_id' => $box->id,
+        'title' => 'Bulk Link Movie 1',
+        'slug' => 'bulk-link-movie-1',
+        'file_name' => 'bulk1.mkv',
+        'file_path' => 'bulk1.mkv',
+        'file_size' => 1048576,
+        'is_active' => true,
+        'is_available' => true,
+    ]);
+
+    $m2 = Media::create([
+        'storage_box_id' => $box->id,
+        'title' => 'Bulk Link Movie 2',
+        'slug' => 'bulk-link-movie-2',
+        'file_name' => 'bulk2.mkv',
+        'file_path' => 'bulk2.mkv',
+        'file_size' => 2097152,
+        'is_active' => true,
+        'is_available' => true,
+    ]);
+
+    $storageMock = Mockery::mock(StorageBoxService::class)->shouldIgnoreMissing();
+    $storageMock->shouldReceive('fileExists')->andReturn(true);
+    $this->app->instance(StorageBoxService::class, $storageMock);
+
+    $response = $this->actingAs($admin)->postJson('/admin/media/bulk-download-links', [
+        'ids' => [$m1->id, $m2->id],
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('count', 2);
+
+    $links = $response->json('links');
+    expect($links)->toHaveCount(2);
+    expect($links[0]['title'])->toBe('Bulk Link Movie 1');
+    expect($links[0]['download_url'])->toContain('/download/stream/');
+    expect($links[1]['title'])->toBe('Bulk Link Movie 2');
+    expect($links[1]['download_url'])->toContain('/download/stream/');
 });

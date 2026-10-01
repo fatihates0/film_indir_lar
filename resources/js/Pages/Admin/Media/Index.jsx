@@ -61,6 +61,89 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
     const [selectionMode, setSelectionMode] = useState(false);
     const [deletingBulk, setDeletingBulk] = useState(false);
 
+    // Bulk Download Links State
+    const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+    const [downloadLinks, setDownloadLinks] = useState([]);
+    const [fetchingLinks, setFetchingLinks] = useState(false);
+    const [copiedMap, setCopiedMap] = useState({});
+    const [linksFilter, setLinksFilter] = useState('');
+
+    const generateDownloadLinks = (targetIds = null) => {
+        const idsToFetch = targetIds ? (Array.isArray(targetIds) ? targetIds : [targetIds]) : selectedIds;
+        if (!idsToFetch || idsToFetch.length === 0) return;
+
+        setFetchingLinks(true);
+        setDownloadModalOpen(true);
+        setDownloadLinks([]);
+        setCopiedMap({});
+        setLinksFilter('');
+
+        fetch(route('admin.media.bulk-download-links'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+            body: JSON.stringify({ ids: idsToFetch }),
+        })
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.success && data.links) {
+                    setDownloadLinks(data.links);
+                } else {
+                    alert(data.message || 'İndirme linkleri oluşturulamadı.');
+                    setDownloadModalOpen(false);
+                }
+            })
+            .catch((err) => {
+                console.error(err);
+                alert('İndirme linkleri oluşturulurken bir hata meydana geldi.');
+                setDownloadModalOpen(false);
+            })
+            .finally(() => {
+                setFetchingLinks(false);
+            });
+    };
+
+    const copyToClipboard = (text, key) => {
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            setCopiedMap((prev) => ({ ...prev, [key]: true }));
+            setTimeout(() => {
+                setCopiedMap((prev) => ({ ...prev, [key]: false }));
+            }, 2000);
+        });
+    };
+
+    const handleCopyAllRawUrls = () => {
+        const validUrls = downloadLinks.filter((item) => item.success && item.download_url).map((item) => item.download_url).join('\n');
+        copyToClipboard(validUrls, 'all_raw');
+    };
+
+    const handleCopyAllFormatted = () => {
+        const formatted = downloadLinks
+            .filter((item) => item.success && item.download_url)
+            .map((item) => {
+                const label = item.quality_label ? ` [${item.quality_label}]` : '';
+                return `${item.title}${label}: ${item.download_url}`;
+            })
+            .join('\n');
+        copyToClipboard(formatted, 'all_formatted');
+    };
+
+    const handleExportTxtFile = () => {
+        const validUrls = downloadLinks.filter((item) => item.success && item.download_url).map((item) => item.download_url).join('\n');
+        const blob = new Blob([validUrls], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `indirme_linkleri_${new Date().toISOString().slice(0, 10)}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
     const showCheckboxes = selectionMode || selectedIds.length > 0;
 
     const clearSelection = () => {
@@ -454,9 +537,9 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                 )}
 
                 {selectedIds.length > 0 && (
-                    <div className="rounded-2xl bg-rose-500/10 border border-rose-500/30 p-4 text-xs text-rose-200 flex items-center justify-between shadow-lg animate-fadeIn">
+                    <div className="rounded-2xl bg-indigo-500/10 border border-indigo-500/30 p-4 text-xs text-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg animate-fadeIn">
                         <div className="flex items-center gap-3">
-                            <span className="font-semibold">{selectedIds.length} içerik seçildi</span>
+                            <span className="font-semibold text-white">{selectedIds.length} içerik seçildi</span>
                             <button
                                 type="button"
                                 onClick={() => setSelectedIds([])}
@@ -465,14 +548,27 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                 Seçimi Temizle
                             </button>
                         </div>
-                        <button
-                            type="button"
-                            onClick={handleBulkDeleteSelected}
-                            disabled={deletingBulk}
-                            className="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-xl font-bold transition-all disabled:opacity-50 shadow-md"
-                        >
-                            {deletingBulk ? 'Siliniyor...' : `Seçilenleri Sil (${selectedIds.length})`}
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={() => generateDownloadLinks(selectedIds)}
+                                disabled={fetchingLinks}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-bold transition-all disabled:opacity-50 shadow-md flex items-center gap-2 text-xs"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                <span>{fetchingLinks ? 'Hazırlanıyor...' : `İndirme Linki Oluştur (${selectedIds.length})`}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleBulkDeleteSelected}
+                                disabled={deletingBulk}
+                                className="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-xl font-bold transition-all disabled:opacity-50 shadow-md text-xs"
+                            >
+                                {deletingBulk ? 'Siliniyor...' : `Seçilenleri Sil (${selectedIds.length})`}
+                            </button>
+                        </div>
                     </div>
                 )}
 
@@ -755,6 +851,17 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                 type="button"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
+                                                                    const gIds = getGroupVersionIds(m);
+                                                                    generateDownloadLinks(gIds);
+                                                                }}
+                                                                className="text-xs text-emerald-400 hover:text-emerald-300 font-medium"
+                                                            >
+                                                                Link Al
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
                                                                     toggleGroupExpand(m.id);
                                                                 }}
                                                                 className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
@@ -867,7 +974,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                                 >
                                                                                                     {ver.is_active ? 'Aktif' : 'Pasif'}
                                                                                                 </button>
-                                                                                                <div className="flex items-center gap-3 w-24 justify-end">
+                                                                                                <div className="flex items-center gap-3 shrink-0 justify-end">
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={() => generateDownloadLinks(ver.id)}
+                                                                                                        className="text-xs text-emerald-400 hover:text-emerald-300 font-medium"
+                                                                                                    >
+                                                                                                        Link Al
+                                                                                                    </button>
                                                                                                     <button
                                                                                                         type="button"
                                                                                                         onClick={() => syncTmdbSingle(ver.id)}
@@ -932,7 +1046,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                         >
                                                                                             {ver.is_active ? 'Aktif' : 'Pasif'}
                                                                                         </button>
-                                                                                        <div className="flex items-center gap-3 w-24 justify-end">
+                                                                                        <div className="flex items-center gap-3 shrink-0 justify-end">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => generateDownloadLinks(ver.id)}
+                                                                                                className="text-xs text-emerald-400 hover:text-emerald-300 font-medium"
+                                                                                            >
+                                                                                                Link Al
+                                                                                            </button>
                                                                                             <button
                                                                                                 type="button"
                                                                                                 onClick={() => syncTmdbSingle(ver.id)}
@@ -1225,6 +1346,187 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                 </div>
                             )}
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Toplu İndirme Linkleri Modalı */}
+            {downloadModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+                    <div className="w-full max-w-4xl bg-[#121724] border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-fadeIn">
+                        {/* Modal Header */}
+                        <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white">Toplu İndirme Linkleri</h3>
+                                    <p className="text-xs text-slate-400">
+                                        {fetchingLinks
+                                            ? 'Linkler hazırlanıyor, lütfen bekleyin...'
+                                            : `${downloadLinks.filter((l) => l.success).length} / ${downloadLinks.length} medya için indirme linki üretildi.`}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setDownloadModalOpen(false)}
+                                className="text-slate-400 hover:text-white font-bold text-xl px-2 py-1 rounded-lg hover:bg-slate-800/50 transition-colors"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        {fetchingLinks ? (
+                            <div className="p-12 text-center flex flex-col items-center justify-center space-y-4">
+                                <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                                <p className="text-sm font-semibold text-slate-300">Güvenli oturumlar ve imzalı URL'ler oluşturuluyor...</p>
+                            </div>
+                        ) : (
+                            <div className="p-6 overflow-y-auto flex-1 space-y-5">
+                                {/* Actions Toolbar */}
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyAllRawUrls}
+                                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                            </svg>
+                                            <span>{copiedMap['all_raw'] ? 'Tüm Linkler Kopyalandı!' : 'Tüm Linkleri Kopyala (IDM / JDownloader)'}</span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyAllFormatted}
+                                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5"
+                                        >
+                                            <span>{copiedMap['all_formatted'] ? 'Kopyalandı!' : 'Başlık + Link Kopyala'}</span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleExportTxtFile}
+                                            className="bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/20 px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                            </svg>
+                                            <span>TXT İndir</span>
+                                        </button>
+                                    </div>
+
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            placeholder="Linklerde ara..."
+                                            value={linksFilter}
+                                            onChange={(e) => setLinksFilter(e.target.value)}
+                                            className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-full sm:w-48"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Items list */}
+                                <div className="space-y-3">
+                                    {downloadLinks
+                                        .filter((item) => {
+                                            if (!linksFilter) return true;
+                                            const q = linksFilter.toLowerCase();
+                                            return (
+                                                (item.title && item.title.toLowerCase().includes(q)) ||
+                                                (item.file_name && item.file_name.toLowerCase().includes(q)) ||
+                                                (item.quality_label && item.quality_label.toLowerCase().includes(q))
+                                            );
+                                        })
+                                        .map((item, idx) => (
+                                            <div
+                                                key={item.id || idx}
+                                                className={`p-4 rounded-2xl border transition-all ${
+                                                    item.success
+                                                        ? 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
+                                                        : 'bg-rose-500/5 border-rose-500/20'
+                                                }`}
+                                            >
+                                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="font-bold text-white text-xs">{item.title}</span>
+                                                            {item.quality_label && (
+                                                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                                                    {item.quality_label}
+                                                                </span>
+                                                            )}
+                                                            {item.season_number && (
+                                                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">
+                                                                    S{String(item.season_number).padStart(2, '0')}
+                                                                    {item.episode_number ? `E${String(item.episode_number).padStart(2, '0')}` : ''}
+                                                                </span>
+                                                            )}
+                                                            {item.file_size > 0 && (
+                                                                <span className="text-[11px] font-mono text-emerald-400 font-semibold">
+                                                                    {(item.file_size / 1073741824).toFixed(2)} GB
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        {item.success ? (
+                                                            <div className="mt-2 flex items-center gap-2">
+                                                                <input
+                                                                    type="text"
+                                                                    readOnly
+                                                                    value={item.download_url}
+                                                                    className="bg-slate-900 border border-slate-800 text-slate-300 text-[11px] font-mono rounded-xl px-3 py-1.5 w-full focus:outline-none select-all"
+                                                                    onClick={(e) => e.target.select()}
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <p className="mt-1 text-xs text-rose-400 font-semibold">{item.error || 'Link üretilemedi'}</p>
+                                                        )}
+                                                    </div>
+
+                                                    {item.success && (
+                                                        <div className="flex items-center gap-2 shrink-0">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => copyToClipboard(item.download_url, `item_${item.id}`)}
+                                                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all flex items-center gap-1.5"
+                                                            >
+                                                                {copiedMap[`item_${item.id}`] ? (
+                                                                    <span className="text-emerald-400 font-bold">✓ Kopyalandı</span>
+                                                                ) : (
+                                                                    <>
+                                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                                        </svg>
+                                                                        <span>Kopyala</span>
+                                                                    </>
+                                                                )}
+                                                            </button>
+                                                            <a
+                                                                href={item.download_url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                                </svg>
+                                                                <span>İndir</span>
+                                                            </a>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

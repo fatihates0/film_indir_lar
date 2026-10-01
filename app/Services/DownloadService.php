@@ -29,6 +29,16 @@ class DownloadService
             abort(403, 'İndirme bağlantısının süresi dolmuş.');
         }
 
+        if (config('downloads.enforce_ip_lock', false) && $session->ip_address) {
+            $clientIp = $request->ip();
+            $sessionIp = $session->ip_address;
+            $isLocal = in_array($clientIp, ['127.0.0.1', '::1']) && in_array($sessionIp, ['127.0.0.1', '::1']);
+
+            if ($clientIp !== $sessionIp && ! $isLocal) {
+                abort(403, 'Bu indirme bağlantısı sadece oluşturulduğu IP adresinden kullanılabilir.');
+            }
+        }
+
         $storageBox = $media->storageBox;
         $fullPath = null;
         try {

@@ -66,6 +66,7 @@ Route::middleware(['auth', EnsureUserIsAdmin::class])->prefix('admin')->name('ad
     Route::post('/media/tmdb-sync-all', [MediaAdminController::class, 'syncAllTmdb'])->name('media.tmdb-sync-all');
     Route::patch('/media/{media}/toggle', [MediaAdminController::class, 'toggleActive'])->name('media.toggle');
     Route::post('/media/bulk-delete', [MediaAdminController::class, 'bulkDelete'])->name('media.bulk-delete');
+    Route::post('/media/bulk-download-links', [MediaAdminController::class, 'bulkDownloadLinks'])->name('media.bulk-download-links');
     Route::delete('/media/{media}/season', [MediaAdminController::class, 'destroySeason'])->name('media.destroy-season');
     Route::delete('/media/{media}', [MediaAdminController::class, 'destroy'])->name('media.destroy');
 

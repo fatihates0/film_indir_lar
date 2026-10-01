@@ -4,6 +4,9 @@ use App\Jobs\ProcessRemoteTransferJob;
 use App\Models\RemoteTransfer;
 use App\Models\StorageBox;
 use App\Models\User;
+use App\Services\AuditLogService;
+use App\Services\RemoteTransferService;
+use App\Services\StorageBoxService;
 use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
@@ -237,8 +240,8 @@ test('duplicate file with same name and matching size is marked as completed wit
 
     // Mock probeUrl on RemoteTransferService to return the same size
     $mockService = Mockery::mock(
-        \App\Services\RemoteTransferService::class,
-        [app(\App\Services\StorageBoxService::class), app(\App\Services\AuditLogService::class)]
+        RemoteTransferService::class,
+        [app(StorageBoxService::class), app(AuditLogService::class)]
     )->makePartial();
     $mockService->shouldReceive('probeUrl')->andReturn([
         'success' => true,
@@ -249,7 +252,7 @@ test('duplicate file with same name and matching size is marked as completed wit
         'suggested_year' => null,
         'suggested_folder' => 'Filmler',
     ]);
-    app()->instance(\App\Services\RemoteTransferService::class, $mockService);
+    app()->instance(RemoteTransferService::class, $mockService);
 
     Queue::fake();
 
@@ -276,7 +279,7 @@ test('duplicate file with same name and matching size is marked as completed wit
 test('remote transfer respects concurrency limit from config and env', function () {
     config(['storagebox.max_concurrent_transfers' => 2]);
 
-    $service = app(\App\Services\RemoteTransferService::class);
+    $service = app(RemoteTransferService::class);
     expect($service->getMaxConcurrency())->toBe(2);
 
     // Create 2 active transferring items
@@ -315,4 +318,36 @@ test('remote transfer respects concurrency limit from config and env', function 
         ->and($pending->fresh()->status)->toBe('pending');
 });
 
+test('duplicate file on ANY storage box is recognized across all boxes and marked completed', function () {
+    // Create box 2
+    $box2 = StorageBox::create([
+        'name' => 'Secondary Box',
+        'slug' => 'secondary-box',
+        'mount_path' => storage_path('app/secondary_box'),
+        'disk_type' => 'cifs',
+        'is_active' => true,
+        'status' => 'online',
+    ]);
 
+    // Create completed transfer on box 2
+    RemoteTransfer::create([
+        'storage_box_id' => $box2->id,
+        'source_url' => 'https://example.com/unique-movie.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'unique-movie.mkv',
+        'relative_path' => 'Filmler/unique-movie.mkv',
+        'total_bytes' => 12345678,
+        'transferred_bytes' => 12345678,
+        'progress_percent' => 100.00,
+        'status' => 'completed',
+    ]);
+
+    $service = app(RemoteTransferService::class);
+
+    // Call findExistingFileAcrossAllBoxes searching for unique-movie.mkv with 12345678 bytes
+    $match = $service->findExistingFileAcrossAllBoxes('unique-movie.mkv', 12345678, 'Filmler');
+
+    expect($match)->not->toBeNull()
+        ->and($match['box']->id)->toBe($box2->id)
+        ->and($match['size'])->toBe(12345678);
+});

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Media;
 use App\Models\StorageBox;
 use App\Services\AuditLogService;
+use App\Services\DownloadAuthorizationService;
 use App\Services\MediaScannerService;
 use App\Services\StorageBoxService;
 use App\Services\TmdbService;
@@ -25,6 +26,7 @@ class MediaAdminController extends Controller
         protected StorageBoxService $storageBoxService,
         protected AuditLogService $auditLogService,
         protected TmdbService $tmdbService,
+        protected DownloadAuthorizationService $downloadAuthService,
     ) {}
 
     public function index(Request $request): Response
@@ -512,5 +514,59 @@ class MediaAdminController extends Controller
         $media->update(['is_active' => ! $media->is_active]);
 
         return back()->with('message', 'Medya durumu güncellendi.');
+    }
+
+    public function bulkDownloadLinks(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'integer|exists:media,id',
+        ]);
+
+        $mediaItems = Media::with('storageBox')
+            ->whereIn('id', $validated['ids'])
+            ->get();
+
+        $links = [];
+
+        foreach ($mediaItems as $media) {
+            try {
+                $authResult = $this->downloadAuthService->authorize(
+                    $request->user(),
+                    $media,
+                    $request->ip(),
+                    $request->userAgent()
+                );
+
+                $links[] = [
+                    'id' => $media->id,
+                    'title' => $media->title,
+                    'file_name' => $media->file_name,
+                    'quality_label' => $media->quality_label,
+                    'season_number' => $media->season_number,
+                    'episode_number' => $media->episode_number,
+                    'file_size' => $media->file_size,
+                    'download_url' => $authResult['download_url'],
+                    'expires_at' => $authResult['expires_at'],
+                    'success' => true,
+                ];
+            } catch (\Throwable $e) {
+                $links[] = [
+                    'id' => $media->id,
+                    'title' => $media->title,
+                    'file_name' => $media->file_name,
+                    'quality_label' => $media->quality_label,
+                    'file_size' => $media->file_size,
+                    'success' => false,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'count' => count($links),
+            'links' => $links,
+        ]);
     }
 }

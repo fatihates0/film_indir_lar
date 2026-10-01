@@ -26,7 +26,7 @@ class DownloadAuthorizationService
             throw new InvalidArgumentException('Hesabınız aktif durumda değil.');
         }
 
-        if (! $user->download_enabled) {
+        if (! $user->download_enabled && ! $user->isAdmin()) {
             throw new InvalidArgumentException('İndirme yetkiniz bulunmamaktadır.');
         }
 
@@ -70,7 +70,7 @@ class DownloadAuthorizationService
 
         // Generate session token
         $token = Str::random(40);
-        $ttlMinutes = config('downloads.url_ttl_minutes', 60);
+        $ttlMinutes = (int) config('downloads.url_ttl_minutes', 60);
         $expiresAt = Carbon::now()->addMinutes($ttlMinutes);
 
         $session = DownloadSession::create([
