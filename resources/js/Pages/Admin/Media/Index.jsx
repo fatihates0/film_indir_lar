@@ -1,6 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 export default function MediaAdminIndex({ media, storageBoxes = [], filters = {} }) {
     const flash = usePage().props.flash;
@@ -56,6 +57,19 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
     const [scanning, setScanning] = useState(false);
     const [syncingAll, setSyncingAll] = useState(false);
     const [syncingId, setSyncingId] = useState(null);
+
+    // TMDB Progress Bar Overlay State
+    const [syncProgress, setSyncProgress] = useState({
+        active: false,
+        completed: false,
+        current: 0,
+        total: 0,
+        percent: 0,
+        currentTitle: '',
+        successCount: 0,
+        failCount: 0,
+    });
+    const syncCancelledRef = useRef(false);
 
     const [selectedIds, setSelectedIds] = useState([]);
     const [selectionMode, setSelectionMode] = useState(false);
@@ -451,11 +465,109 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
         });
     };
 
-    const syncAllTmdb = () => {
+    const syncAllTmdb = async () => {
+        if (syncProgress.active && !syncProgress.completed) return;
+
         setSyncingAll(true);
-        router.post(route('admin.media.tmdb-sync-all'), {}, {
-            onFinish: () => setSyncingAll(false),
-        });
+        try {
+            const res = await fetch(route('admin.media.unsynced-tmdb'));
+            const data = await res.json();
+
+            let itemsToSync = data.items || [];
+
+            if (itemsToSync.length === 0) {
+                if (confirm('Tüm içeriklerin TMDB bilgileri zaten çekilmiş durumda.\n\nYine de TÜM kütüphane içeriklerini yeniden taramak ve güncellemek ister misiniz?')) {
+                    const allRes = await fetch(route('admin.media.all-tmdb-ids'));
+                    const allData = await allRes.json();
+                    itemsToSync = allData.items || [];
+                } else {
+                    setSyncingAll(false);
+                    return;
+                }
+            }
+
+            if (itemsToSync.length === 0) {
+                alert('Taranacak medya bulunamadı.');
+                setSyncingAll(false);
+                return;
+            }
+
+            syncCancelledRef.current = false;
+            setSyncProgress({
+                active: true,
+                completed: false,
+                current: 0,
+                total: itemsToSync.length,
+                percent: 0,
+                currentTitle: itemsToSync[0]?.title || '',
+                successCount: 0,
+                failCount: 0,
+            });
+
+            let success = 0;
+            let fail = 0;
+
+            for (let i = 0; i < itemsToSync.length; i++) {
+                if (syncCancelledRef.current) break;
+
+                const item = itemsToSync[i];
+                const currentNum = i + 1;
+                const pct = Math.round((currentNum / itemsToSync.length) * 100);
+
+                setSyncProgress((prev) => ({
+                    ...prev,
+                    current: currentNum,
+                    percent: pct,
+                    currentTitle: item.title,
+                }));
+
+                try {
+                    const response = await fetch(route('admin.media.tmdb-sync', item.id), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                        },
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        success++;
+                    } else {
+                        fail++;
+                    }
+                } catch (err) {
+                    fail++;
+                }
+
+                setSyncProgress((prev) => ({
+                    ...prev,
+                    successCount: success,
+                    failCount: fail,
+                }));
+            }
+
+            setSyncProgress((prev) => ({
+                ...prev,
+                completed: true,
+                currentTitle: syncCancelledRef.current ? 'İşlem İptal Edildi' : 'Tüm İşlemler Tamamlandı!',
+            }));
+
+            router.reload({ preserveScroll: true });
+        } catch (err) {
+            console.error(err);
+            alert('TMDB bilgileri alınırken bir hata oluştu.');
+        } finally {
+            setSyncingAll(false);
+        }
+    };
+
+    const cancelTmdbSync = () => {
+        syncCancelledRef.current = true;
+    };
+
+    const closeSyncProgress = () => {
+        setSyncProgress((prev) => ({ ...prev, active: false }));
     };
 
     const toggleActive = (id) => {
@@ -1529,6 +1641,82 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                         )}
                     </div>
                 </div>
+            )}
+
+            {/* Floating Bottom-Right TMDB Sync Progress Overlay (Portal to document.body) */}
+            {syncProgress.active && typeof document !== 'undefined' && createPortal(
+                <div className="fixed bottom-6 right-6 md:bottom-8 md:right-8 z-[99999] w-80 md:w-96 rounded-3xl bg-[#0f1422]/95 border border-indigo-500/40 p-5 shadow-2xl backdrop-blur-xl text-xs transition-all space-y-3 animate-fadeIn">
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                        <div className="flex items-center gap-2.5 font-bold text-white text-sm">
+                            {!syncProgress.completed ? (
+                                <span className="relative flex h-3 w-3">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                                </span>
+                            ) : (
+                                <span className="text-emerald-400 text-sm">✓</span>
+                            )}
+                            <span>TMDB Senkronizasyonu</span>
+                        </div>
+
+                        {!syncProgress.completed ? (
+                            <button
+                                type="button"
+                                onClick={cancelTmdbSync}
+                                className="text-slate-400 hover:text-rose-400 text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-slate-800/60 hover:bg-rose-500/10 border border-slate-700/60 transition-all"
+                            >
+                                İptal Et
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={closeSyncProgress}
+                                className="text-slate-400 hover:text-white text-xs font-semibold p-1 rounded-lg hover:bg-slate-800 transition-all"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Title & Progress info */}
+                    <div className="space-y-1.5">
+                        <div className="text-[11px] font-medium text-slate-400 flex justify-between items-center">
+                            <span className="truncate max-w-[220px] text-slate-200 font-mono">
+                                {syncProgress.completed
+                                    ? syncProgress.currentTitle
+                                    : `Taranıyor: ${syncProgress.currentTitle || 'Hazırlanıyor...'}`}
+                            </span>
+                            <span className="font-bold text-indigo-400 font-mono text-xs">
+                                %{syncProgress.percent}
+                            </span>
+                        </div>
+
+                        {/* Progress Track */}
+                        <div className="h-2 w-full rounded-full bg-slate-950 border border-slate-800 overflow-hidden p-0.5">
+                            <div
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                    syncProgress.completed
+                                        ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                        : 'bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 animate-pulse'
+                                }`}
+                                style={{ width: `${Math.max(syncProgress.percent, 3)}%` }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Summary Numbers */}
+                    <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1">
+                        <div>
+                            Durum: <strong className="text-white">{syncProgress.current}</strong> / <strong className="text-white">{syncProgress.total}</strong> taranıyor
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                            <span className="text-emerald-400 font-semibold" title="Başarıyla güncellendi">✓ {syncProgress.successCount}</span>
+                            <span className="text-rose-400 font-semibold" title="Eşleşmedi veya hata">✕ {syncProgress.failCount}</span>
+                        </div>
+                    </div>
+                </div>,
+                document.body
             )}
         </AuthenticatedLayout>
     );

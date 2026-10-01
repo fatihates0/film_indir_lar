@@ -376,6 +376,34 @@ class MediaAdminController extends Controller
         return back()->with('error', sprintf('"%s" için TMDB bilgisi bulunamadı.', $media->title));
     }
 
+    public function unsyncedTmdbMedia(): JsonResponse
+    {
+        $items = Media::whereNull('tmdb_id')
+            ->orWhere('tmdb_id', 0)
+            ->select(['id', 'title', 'year', 'type'])
+            ->orderBy('id', 'desc')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'total' => $items->count(),
+            'items' => $items,
+        ]);
+    }
+
+    public function allTmdbMedia(): JsonResponse
+    {
+        $items = Media::select(['id', 'title', 'year', 'type'])
+            ->orderBy('id', 'desc')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'total' => $items->count(),
+            'items' => $items,
+        ]);
+    }
+
     public function syncAllTmdb(): RedirectResponse
     {
         $unSyncedMedia = Media::whereNull('tmdb_id')->orWhere('tmdb_id', 0)->get();

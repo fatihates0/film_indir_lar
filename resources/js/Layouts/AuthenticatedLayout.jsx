@@ -285,10 +285,10 @@ export default function AuthenticatedLayout({ header, children }) {
             )}
 
             {/* Main Content Area */}
-            <main className="py-8 relative z-10">{children}</main>
+            <main className="py-8 relative">{children}</main>
 
             {/* Footer */}
-            <footer className="border-t border-white/5 bg-[#06070a] py-8 mt-12 text-center text-slate-500 text-xs relative z-10">
+            <footer className="border-t border-white/5 bg-[#06070a] py-8 mt-12 text-center text-slate-500 text-xs relative">
                 <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="flex items-center gap-2">
                         <span className="font-display font-black text-sm text-slate-300">CINEBOX</span>
