@@ -640,9 +640,14 @@ process_webdav() {
 
     echo -e "${BLUE}[+] WebDAV Sunucusuna bağlanılıyor: ${full_url}${NC}"
 
-    # PROPFIND ile dosya listesini çek
+    # PROPFIND ile (Depth: infinity) tüm alt klasörler dahil dosya listesini çek
     local propfind_xml=""
-    propfind_xml=$(curl -s -k -u "${REMOTE_USER}:${REMOTE_PASS}" -X PROPFIND -H "Depth: 1" "${full_url}/" || echo "")
+    propfind_xml=$(curl -s -k -u "${REMOTE_USER}:${REMOTE_PASS}" -X PROPFIND -H "Depth: infinity" "${full_url}/" || echo "")
+
+    # Eğer Depth: infinity kabul edilmediyse Depth: 1 deneyelim
+    if [ -z "$propfind_xml" ]; then
+        propfind_xml=$(curl -s -k -u "${REMOTE_USER}:${REMOTE_PASS}" -X PROPFIND -H "Depth: 1" "${full_url}/" || echo "")
+    fi
 
     if [ -z "$propfind_xml" ]; then
         echo -e "${RED}Hata: WebDAV sunucusundan dosya listesi alınamadı. Lütfen URL ve giriş bilgilerini kontrol edin.${NC}"
@@ -660,7 +665,7 @@ process_webdav() {
         foreach ($nodes as $node) {
             $path = (string)$node;
             $decoded = urldecode($path);
-            if (!preg_match("/\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i", $decoded)) continue;
+            if (!preg_match("/\.(mkv|mp4|avi|m4v|ts|m2ts|mov|webm|flv|wmv|iso)$/i", $decoded)) continue;
             echo $decoded . "\n";
         }
     ' "$propfind_xml" 2>/dev/null || echo "")
@@ -704,34 +709,101 @@ process_webdav() {
 
 # FTP İşlemleri
 process_ftp() {
-    local ftp_base="ftp://${REMOTE_HOST}:${REMOTE_PORT}${REMOTE_DIR}"
-    ftp_base="${ftp_base%/}"
-
-    echo -e "${BLUE}[+] FTP Sunucusuna bağlanılıyor: ${REMOTE_HOST}:${REMOTE_PORT}${REMOTE_DIR}${NC}"
+    echo -e "${BLUE}[+] FTP Sunucusuna bağlanılıyor (Özyinelemeli / Tüm Alt Klasörler): ${REMOTE_HOST}:${REMOTE_PORT}${REMOTE_DIR}${NC}"
 
     local file_list=""
-    file_list=$(curl -s --user "${REMOTE_USER}:${REMOTE_PASS}" "${ftp_base}/" | awk '{print $NF}' || echo "")
+    file_list=$(php -r '
+        $host = $argv[1];
+        $port = (int)$argv[2];
+        $user = $argv[3];
+        $pass = $argv[4];
+        $baseDir = $argv[5];
+
+        $files = array();
+        $queue = array(rtrim($baseDir, "/"));
+        if (empty($queue[0])) $queue[0] = "/";
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_USERPWD, "{$user}:{$pass}");
+
+        while (!empty($queue)) {
+            $dir = array_shift($queue);
+            $url = "ftp://{$host}:{$port}" . rtrim($dir, "/") . "/";
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_FTPLISTONLY, false);
+            $output = curl_exec($ch);
+
+            if (empty($output)) {
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_FTPLISTONLY, true);
+                $output = curl_exec($ch);
+            }
+
+            if (empty($output)) continue;
+
+            $lines = explode("\n", str_replace("\r", "", $output));
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (empty($line)) continue;
+
+                $isDir = false;
+                $name = "";
+
+                if (preg_match("/^d[rwx\-]{9}/i", $line)) {
+                    $isDir = true;
+                    $parts = preg_split("/\s+/", $line, 9);
+                    $name = $parts[8] ?? "";
+                } elseif (preg_match("/<DIR>/i", $line)) {
+                    $isDir = true;
+                    $parts = preg_split("/\s+/", $line, 4);
+                    $name = $parts[3] ?? "";
+                } elseif (preg_match("/^-[rwx\-]{9}/i", $line)) {
+                    $parts = preg_split("/\s+/", $line, 9);
+                    $name = $parts[8] ?? "";
+                } else {
+                    $name = $line;
+                }
+
+                if (empty($name) || $name === "." || $name === "..") continue;
+
+                $itemPath = rtrim($dir, "/") . "/" . ltrim($name, "/");
+
+                if ($isDir) {
+                    $queue[] = $itemPath;
+                } else {
+                    if (preg_match("/\.(mkv|mp4|avi|m4v|ts|m2ts|mov|webm|flv|wmv|iso)$/i", $name)) {
+                        $files[] = $itemPath;
+                    }
+                }
+            }
+        }
+        curl_close($ch);
+        foreach ($files as $f) {
+            echo $f . "\n";
+        }
+    ' "$REMOTE_HOST" "$REMOTE_PORT" "$REMOTE_USER" "$REMOTE_PASS" "$REMOTE_DIR" 2>/dev/null || echo "")
 
     if [ -z "$file_list" ]; then
-        echo -e "${YELLOW}FTP dizininde dosya bulunamadı veya FTP bağlantısı kurulamadı.${NC}"
+        echo -e "${YELLOW}FTP dizininde işlenecek video dosyası bulunamadı veya FTP bağlantısı kurulamadı.${NC}"
         return
     fi
 
-    echo "$file_list" | while read -r file_name; do
-        if [ -z "$file_name" ]; then continue; fi
+    echo "$file_list" | while read -r rel_path; do
+        if [ -z "$rel_path" ]; then continue; fi
 
-        case "${file_name##*.}" in
-            mkv|mp4|avi|m4v|ts|mov|webm) ;;
-            *) continue ;;
-        esac
+        local file_name=$(basename "$rel_path")
+        local dir_path=$(dirname "$rel_path")
 
-        local probe_url="ftp://${REMOTE_USER}:${REMOTE_PASS}@${REMOTE_HOST}:${REMOTE_PORT}${REMOTE_DIR}/${file_name}"
+        local probe_url="ftp://${REMOTE_USER}:${REMOTE_PASS}@${REMOTE_HOST}:${REMOTE_PORT}${rel_path}"
         local new_name=$(compute_new_filename "$file_name" "$probe_url")
 
         if [ -n "$new_name" ]; then
-            local old_path="${REMOTE_DIR}/${file_name}"
+            local old_path="${rel_path}"
             old_path=$(echo "$old_path" | sed -E 's#//+#/#g')
-            local new_path="${REMOTE_DIR}/${new_name}"
+            local new_path="${dir_path}/${new_name}"
             new_path=$(echo "$new_path" | sed -E 's#//+#/#g')
 
             if [ "$DRY_RUN" = true ]; then
@@ -756,9 +828,9 @@ process_local() {
         exit 1
     fi
 
-    echo -e "${BLUE}[+] Yerel dizin işleniyor: ${target_dir}${NC}"
+    echo -e "${BLUE}[+] Yerel dizin işleniyor (Tüm Alt Klasörler Dahil): ${target_dir}${NC}"
 
-    find "$target_dir" -maxdepth 2 -type f | while read -r file_path; do
+    find "$target_dir" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.m4v" -o -iname "*.ts" -o -iname "*.m2ts" -o -iname "*.mov" -o -iname "*.webm" -o -iname "*.flv" -o -iname "*.wmv" -o -iname "*.iso" \) | while read -r file_path; do
         local file_name=$(basename "$file_path")
         local dir_name=$(dirname "$file_path")
         
