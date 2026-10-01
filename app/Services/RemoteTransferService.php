@@ -64,18 +64,34 @@ class RemoteTransferService
 
     public function hasAvailableSpace(StorageBox $storageBox, int $requiredBytes): bool
     {
+        if ($requiredBytes <= 0) {
+            return true;
+        }
+
         $stats = $this->storageManager->driverForBox($storageBox)->getStorageStats();
-        if ($stats['free'] !== null) {
+        if ($stats['free'] !== null && $stats['free'] > 0) {
             return $stats['free'] >= $requiredBytes;
         }
 
         return true;
     }
 
-    public function selectStorageBox(StorageBox|string|null $preference, int $requiredBytes, array $excludeBoxIds = []): StorageBox
+    public function selectStorageBox(StorageBox|string|int|null $preference, int $requiredBytes = 0, array $excludeBoxIds = []): StorageBox
     {
         if ($preference instanceof StorageBox) {
-            return $preference;
+            if (empty($excludeBoxIds) || ! in_array($preference->id, $excludeBoxIds)) {
+                return $preference;
+            }
+        }
+
+        if (is_numeric($preference)) {
+            $boxId = (int) $preference;
+            if (empty($excludeBoxIds) || ! in_array($boxId, $excludeBoxIds)) {
+                $box = StorageBox::find($boxId);
+                if ($box && $box->is_active) {
+                    return $box;
+                }
+            }
         }
 
         $query = StorageBox::where('is_active', true);
