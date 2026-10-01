@@ -31,7 +31,7 @@ class RemoteTransferService
 
     public function getActiveTransfersCount(): int
     {
-        return RemoteTransfer::whereIn('status', ['transferring', 'in_progress'])->count();
+        return RemoteTransfer::whereIn('status', ['queued', 'transferring', 'in_progress'])->count();
     }
 
     public function findExistingFileAcrossAllBoxes(string $fileName, int $fileSize, ?string $targetFolder = null): ?array
@@ -109,7 +109,7 @@ class RemoteTransferService
 
     public function cleanupStuckTransfers(): int
     {
-        $stuckTransfers = RemoteTransfer::whereIn('status', ['transferring', 'in_progress'])->get();
+        $stuckTransfers = RemoteTransfer::whereIn('status', ['queued', 'transferring', 'in_progress'])->get();
         $cleaned = 0;
 
         foreach ($stuckTransfers as $transfer) {
@@ -198,8 +198,15 @@ class RemoteTransferService
         $started = 0;
 
         foreach ($pendingItems as $next) {
-            ProcessRemoteTransferJob::dispatch($next);
-            $started++;
+            $updated = RemoteTransfer::where('id', $next->id)
+                ->where('status', 'pending')
+                ->update(['status' => 'queued']);
+
+            if ($updated > 0) {
+                $next->status = 'queued';
+                ProcessRemoteTransferJob::dispatch($next);
+                $started++;
+            }
         }
 
         return $started;
@@ -361,7 +368,6 @@ class RemoteTransferService
                     'auto_add_media' => $autoAddMedia,
                 ]);
 
-                ProcessRemoteTransferJob::dispatch($transfer);
                 $queued[] = $transfer;
             } catch (Exception $e) {
                 $errors[] = [
@@ -370,6 +376,8 @@ class RemoteTransferService
                 ];
             }
         }
+
+        $this->processQueue();
 
         $auditTargetId = $storageBox instanceof StorageBox ? (string) $storageBox->id : 'random';
         $this->auditLogService->log(

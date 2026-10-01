@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\MediaType;
 use App\Http\Controllers\Controller;
 use App\Jobs\MediaScanJob;
-use App\Jobs\ProcessRemoteTransferJob;
 use App\Models\Media;
 use App\Models\MediaScan;
 use App\Models\RemoteTransfer;
@@ -944,7 +943,7 @@ class StorageBoxAdminController extends Controller
             'auto_add_media' => $request->boolean('auto_add_media', true),
         ]);
 
-        ProcessRemoteTransferJob::dispatch($transfer);
+        $transferService->processQueue();
 
         $this->auditLogService->log(
             action: 'remote_transfer_started',

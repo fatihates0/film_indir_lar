@@ -54,7 +54,7 @@ test('admin can start a remote transfer and dispatch job', function () {
     $this->assertDatabaseHas('remote_transfers', [
         'storage_box_id' => $this->box->id,
         'file_name' => 'movie.2025.mkv',
-        'status' => 'pending',
+        'status' => 'queued',
     ]);
 
     Queue::assertPushed(ProcessRemoteTransferJob::class);
@@ -207,7 +207,7 @@ test('admin can upload to random storage box with space check and fallback', fun
     $response->assertRedirect();
     $this->assertDatabaseHas('remote_transfers', [
         'file_name' => 'random-movie.mkv',
-        'status' => 'pending',
+        'status' => 'queued',
     ]);
 
     // Bulk transfer with random storage box
@@ -372,4 +372,30 @@ test('cleanupStuckTransfers auto-completes transfers whose full size matches rem
     expect($cleaned)->toBe(1)
         ->and($transfer->fresh()->status)->toBe('completed')
         ->and($transfer->fresh()->progress_percent)->toBe(100.0);
+});
+
+test('processQueue does not repeatedly dispatch duplicate jobs on multiple ticks', function () {
+    Queue::fake();
+
+    RemoteTransfer::create([
+        'storage_box_id' => $this->box->id,
+        'source_url' => 'https://example.com/loop_test.mkv',
+        'target_folder' => 'Filmler',
+        'file_name' => 'loop_test.mkv',
+        'relative_path' => 'Filmler/loop_test.mkv',
+        'status' => 'pending',
+    ]);
+
+    $service = app(RemoteTransferService::class);
+
+    // First tick
+    $started1 = $service->processQueue();
+    expect($started1)->toBe(1);
+
+    // Second tick (e.g. daemon loop 2s later)
+    $started2 = $service->processQueue();
+    expect($started2)->toBe(0);
+
+    // Job should only be pushed once
+    Queue::assertPushed(ProcessRemoteTransferJob::class, 1);
 });

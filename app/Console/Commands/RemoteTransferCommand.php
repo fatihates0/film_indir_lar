@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\ProcessRemoteTransferJob;
 use App\Models\RemoteTransfer;
 use App\Models\StorageBox;
 use App\Services\RemoteTransferService;
@@ -27,11 +26,12 @@ class RemoteTransferCommand extends Command
         $customName = $this->option('name');
         $isSync = $this->option('sync');
 
-        $this->info("🔍 URL bilgileri taranıyor...");
+        $this->info('🔍 URL bilgileri taranıyor...');
         $probe = $transferService->probeUrl($url);
 
         if (! $probe['success']) {
-            $this->error("❌ URL taranamadı veya ulaşılamadı.");
+            $this->error('❌ URL taranamadı veya ulaşılamadı.');
+
             return Command::FAILURE;
         }
 
@@ -46,13 +46,14 @@ class RemoteTransferCommand extends Command
         $storageBox = $boxId ? StorageBox::find($boxId) : StorageBox::where('is_active', true)->first();
 
         if (! $storageBox) {
-            $this->error("❌ Aktif bir Storage Box bulunamadı.");
+            $this->error('❌ Aktif bir Storage Box bulunamadı.');
+
             return Command::FAILURE;
         }
 
         $this->line("🗄️ Hedef Storage Box: <info>{$storageBox->name}</info> [Klasör: {$folder}]");
 
-        $relativePath = trim($folder, '/\\') . '/' . $fileName;
+        $relativePath = trim($folder, '/\\').'/'.$fileName;
 
         $transfer = RemoteTransfer::create([
             'storage_box_id' => $storageBox->id,
@@ -69,13 +70,14 @@ class RemoteTransferCommand extends Command
         ]);
 
         if (! $isSync) {
-            ProcessRemoteTransferJob::dispatch($transfer);
+            $transferService->processQueue();
             $this->info("🚀 Transfer arka plan kuyruğuna alındı (Transfer ID: #{$transfer->id}).");
             $this->line("Web arayüzünden veya 'php artisan queue:work' çalıştırarak takip edebilirsiniz.");
+
             return Command::SUCCESS;
         }
 
-        $this->info("🚀 Aktarım başlatılıyor...");
+        $this->info('🚀 Aktarım başlatılıyor...');
         $bar = $this->output->createProgressBar(100);
         $bar->start();
 
@@ -84,7 +86,7 @@ class RemoteTransferCommand extends Command
                 $percent = (int) round(($transferred / $total) * 100);
                 $bar->setProgress($percent);
             }
-            $speedFormatted = $transferService->formatBytes($speedBps) . '/s';
+            $speedFormatted = $transferService->formatBytes($speedBps).'/s';
             $transferredFormatted = $transferService->formatBytes($transferred);
             $totalFormatted = $transferService->formatBytes($total);
             $bar->setMessage("{$transferredFormatted} / {$totalFormatted} ({$speedFormatted})");
@@ -95,11 +97,13 @@ class RemoteTransferCommand extends Command
 
         if ($success) {
             $this->info("✅ Dosya başarıyla '{$storageBox->name}' içerisindeki '{$folder}' klasörüne aktarıldı ve Medya Kütüphanesine eklendi!");
+
             return Command::SUCCESS;
         }
 
         $transfer->refresh();
-        $this->error("❌ Aktarım başarısız: " . ($transfer->error_message ?: 'Bilinmeyen hata'));
+        $this->error('❌ Aktarım başarısız: '.($transfer->error_message ?: 'Bilinmeyen hata'));
+
         return Command::FAILURE;
     }
 }
