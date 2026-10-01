@@ -1,7 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router } from '@inertiajs/react';
 import axios from 'axios';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function MediaIndex({ media, allGenres = [], filters = {}, quota = {} }) {
     // Sanitize props
@@ -15,14 +15,33 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
     const [type, setType] = useState(rawFilters.type ? String(rawFilters.type) : '');
     const [genre, setGenre] = useState(rawFilters.genre ? String(rawFilters.genre) : '');
     const [sortBy, setSortBy] = useState(rawFilters.sort ? String(rawFilters.sort) : 'created_at');
-    
+
     const [loadingId, setLoadingId] = useState(null);
     const [errorMessage, setErrorMessage] = useState(null);
     const [downloadModal, setDownloadModal] = useState(null);
     const [copied, setCopied] = useState(false);
 
-    // Featured Hero Item (first item with backdrop or first item in list)
-    const featuredItem = mediaList.find(item => item.backdrop_url || item.poster_url) || mediaList[0];
+    // 4 Featured Hero Items Slider
+    const featuredItems = mediaList.filter(item => item.backdrop_url || item.poster_url).slice(0, 4);
+    if (featuredItems.length < 4 && mediaList.length > featuredItems.length) {
+        mediaList.forEach(item => {
+            if (featuredItems.length < 4 && !featuredItems.some(f => f.id === item.id)) {
+                featuredItems.push(item);
+            }
+        });
+    }
+
+    const [activeSlide, setActiveSlide] = useState(0);
+
+    useEffect(() => {
+        if (featuredItems.length <= 1) return;
+        const timer = setInterval(() => {
+            setActiveSlide(prev => (prev + 1) % featuredItems.length);
+        }, 8000);
+        return () => clearInterval(timer);
+    }, [featuredItems.length]);
+
+    const activeFeatured = featuredItems[activeSlide] || featuredItems[0];
 
     const handleSearch = (e) => {
         if (e && typeof e.preventDefault === 'function') {
@@ -54,12 +73,15 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
     };
 
     const handleDownload = async (item) => {
-        if (!item || !item.id) return;
+        if (!item) return;
+        const targetId = item.highest_quality_id || item.id;
+        if (!targetId) return;
+
         setLoadingId(item.id);
         setErrorMessage(null);
 
         try {
-            const res = await axios.post(route('media.authorize-download', item.id));
+            const res = await axios.post(route('media.authorize-download', targetId));
             if (res?.data?.success) {
                 setDownloadModal({
                     title: item.title,
@@ -67,7 +89,7 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                     poster_url: item.poster_url,
                     download_url: res.data.download_url,
                     expires_at: res.data.expires_at,
-                    size_gb: item.file_size ? (item.file_size / 1073741824).toFixed(2) : '0.00',
+                    size_gb: res.data.file_size ? (res.data.file_size / 1073741824).toFixed(2) : (item.file_size ? (item.file_size / 1073741824).toFixed(2) : '0.00'),
                 });
             }
         } catch (err) {
@@ -125,61 +147,113 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                     </div>
                 )}
 
-                {/* Hero Featured Spotlight Card (If available on first page) */}
-                {featuredItem && !search && !genre && !type && (
-                    <div className="relative rounded-3xl overflow-hidden glass-panel border border-white/10 min-h-[340px] flex items-end p-6 md:p-10 shadow-2xl group">
-                        <div 
-                            className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 group-hover:scale-105"
-                            style={{ backgroundImage: `url(${featuredItem.backdrop_url || featuredItem.poster_url || '/placeholder.jpg'})` }}
+                {/* Hero Featured Spotlight Carousel (4 Items) */}
+                {activeFeatured && !search && !genre && !type && (
+                    <div className="relative rounded-3xl overflow-hidden glass-panel border border-white/10 min-h-[380px] md:min-h-[420px] flex items-center p-6 md:p-10 shadow-2xl group transition-all duration-700">
+                        {/* Background Backdrop with Gradient & Soft Blur */}
+                        <div
+                            key={activeFeatured.id}
+                            className="absolute inset-0 bg-cover bg-center transition-all duration-1000 transform group-hover:scale-105 opacity-50 blur-[2px]"
+                            style={{ backgroundImage: `url(${activeFeatured.backdrop_url || activeFeatured.poster_url || '/placeholder.jpg'})` }}
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/70 to-transparent" />
-                        <div className="absolute inset-0 bg-gradient-to-r from-[#08090d] via-[#08090d]/50 to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/70 to-[#08090d]/40" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-[#08090d] via-[#08090d]/80 to-transparent" />
 
-                        <div className="relative z-10 max-w-2xl space-y-4 text-left">
-                            <div className="flex items-center gap-2">
-                                <span className="px-3 py-1 rounded-lg gradient-badge-4k text-[10px] uppercase font-bold tracking-wider">
-                                    ÖNE ÇIKAN İÇERİK
-                                </span>
-                                {featuredItem.tmdb_rating > 0 && (
-                                    <span className="px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md text-amber-400 text-xs font-bold border border-white/10 flex items-center gap-1">
-                                        ★ {featuredItem.tmdb_rating}
+                        {/* Content & Poster Layout Grid */}
+                        <div className="relative z-10 w-full flex flex-col md:flex-row items-center justify-between gap-6 md:gap-10">
+                            {/* Left Details Content */}
+                            <div className="max-w-xl space-y-4 text-left w-full">
+                                <div className="flex items-center gap-2">
+                                    <span className="px-3 py-1 rounded-lg gradient-badge-4k text-[10px] uppercase font-bold tracking-wider">
+                                        ÖNE ÇIKAN İÇERİK ({activeSlide + 1}/{featuredItems.length})
                                     </span>
+                                    {(activeFeatured.vote_average || activeFeatured.tmdb_rating) > 0 && (
+                                        <span className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md text-amber-400 text-xs font-bold border border-white/10 flex items-center gap-1">
+                                            ★ {(activeFeatured.vote_average || activeFeatured.tmdb_rating).toFixed ? (activeFeatured.vote_average || activeFeatured.tmdb_rating).toFixed(1) : (activeFeatured.vote_average || activeFeatured.tmdb_rating)}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <h2 className="font-display font-black text-3xl sm:text-4xl lg:text-5xl text-white tracking-tight leading-tight drop-shadow-md">
+                                    {activeFeatured.title}
+                                </h2>
+
+                                {activeFeatured.overview && (
+                                    <p className="text-slate-300 text-xs sm:text-sm line-clamp-3 leading-relaxed max-w-lg">
+                                        {activeFeatured.overview}
+                                    </p>
                                 )}
+
+                                <div className="flex items-center gap-4 pt-2">
+                                    <Link
+                                        href={route('media.show', activeFeatured.id)}
+                                        className="px-6 py-3 rounded-2xl gradient-button text-white font-bold text-xs sm:text-sm shadow-xl flex items-center gap-2 hover:scale-105 transition-transform"
+                                    >
+                                        <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                                            <path d="M8 5v14l11-7z" />
+                                        </svg>
+                                        Detaylar
+                                    </Link>
+
+                                    <button
+                                        onClick={() => handleDownload(activeFeatured)}
+                                        disabled={loadingId === activeFeatured.id}
+                                        className="px-6 py-3 rounded-2xl glass-panel text-white font-bold text-xs sm:text-sm hover:border-white/30 hover:scale-105 transition-all flex items-center gap-2"
+                                    >
+                                        <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                        </svg>
+                                        {loadingId === activeFeatured.id ? 'Yetkilendiriliyor...' : 'Hızlı İndir'}
+                                    </button>
+                                </div>
                             </div>
 
-                            <h2 className="font-display font-black text-3xl sm:text-5xl text-white tracking-tight leading-tight">
-                                {featuredItem.title}
-                            </h2>
-
-                            {featuredItem.overview && (
-                                <p className="text-slate-300 text-xs sm:text-sm line-clamp-2 leading-relaxed">
-                                    {featuredItem.overview}
-                                </p>
+                            {/* Right Poster Showcase Card */}
+                            {activeFeatured.poster_url && (
+                                <div className="hidden md:block shrink-0 w-44 lg:w-56 aspect-[2/3] rounded-2xl overflow-hidden border border-white/20 shadow-[0_20px_50px_rgba(0,0,0,0.9)] transform group-hover:scale-105 transition-all duration-500 relative">
+                                    <img
+                                        src={activeFeatured.poster_url}
+                                        alt={activeFeatured.title}
+                                        className="w-full h-full object-cover"
+                                    />
+                                    <div className="absolute inset-0 ring-1 ring-inset ring-white/20 rounded-2xl pointer-events-none" />
+                                </div>
                             )}
+                        </div>
 
-                            <div className="flex items-center gap-4 pt-2">
-                                <Link
-                                    href={route('media.show', featuredItem.id)}
-                                    className="px-6 py-3 rounded-2xl gradient-button text-white font-bold text-xs sm:text-sm shadow-xl flex items-center gap-2"
+                        {/* Carousel Navigation Dots & Prev/Next Controls */}
+                        {featuredItems.length > 1 && (
+                            <div className="absolute bottom-4 right-6 md:bottom-6 md:right-10 z-20 flex items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveSlide(prev => (prev - 1 + featuredItems.length) % featuredItems.length)}
+                                    className="w-8 h-8 rounded-full bg-black/70 border border-white/20 text-white flex items-center justify-center hover:bg-white/20 transition-all font-bold shadow-lg"
                                 >
-                                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                                        <path d="M8 5v14l11-7z" />
-                                    </svg>
-                                    Detaylar & İzle
-                                </Link>
+                                    ‹
+                                </button>
+
+                                <div className="flex items-center gap-1.5">
+                                    {featuredItems.map((_, idx) => (
+                                        <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => setActiveSlide(idx)}
+                                            className={`h-2 rounded-full transition-all duration-300 ${
+                                                activeSlide === idx ? 'w-6 bg-indigo-500' : 'w-2 bg-white/40 hover:bg-white/70'
+                                            }`}
+                                        />
+                                    ))}
+                                </div>
 
                                 <button
-                                    onClick={() => handleDownload(featuredItem)}
-                                    disabled={loadingId === featuredItem.id}
-                                    className="px-6 py-3 rounded-2xl glass-panel text-white font-bold text-xs sm:text-sm hover:border-white/30 transition-all flex items-center gap-2"
+                                    type="button"
+                                    onClick={() => setActiveSlide(prev => (prev + 1) % featuredItems.length)}
+                                    className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white flex items-center justify-center hover:bg-white/20 transition-all font-bold shadow-lg"
                                 >
-                                    <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    {loadingId === featuredItem.id ? 'Yetkilendiriliyor...' : 'Hızlı İndir'}
+                                    ›
                                 </button>
                             </div>
-                        </div>
+                        )}
                     </div>
                 )}
 
@@ -256,9 +330,8 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                         <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
                             <button
                                 onClick={() => handleGenreChange('')}
-                                className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-                                    !genre ? 'bg-indigo-600 text-white shadow-glow-purple' : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
-                                }`}
+                                className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${!genre ? 'bg-indigo-600 text-white shadow-glow-purple' : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
+                                    }`}
                             >
                                 Tüm Türler
                             </button>
@@ -266,9 +339,8 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                                 <button
                                     key={g}
                                     onClick={() => handleGenreChange(g)}
-                                    className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-                                        genre === g ? 'bg-indigo-600 text-white shadow-glow-purple' : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
-                                    }`}
+                                    className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${genre === g ? 'bg-indigo-600 text-white shadow-glow-purple' : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
+                                        }`}
                                 >
                                     {g}
                                 </button>
@@ -413,13 +485,12 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                                 key={idx}
                                 disabled={!link.url || link.active}
                                 onClick={() => link.url && router.get(link.url, {}, { preserveState: true })}
-                                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                                    link.active
+                                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${link.active
                                         ? 'bg-indigo-600 text-white shadow-glow-purple'
                                         : link.url
-                                        ? 'glass-panel text-slate-300 hover:bg-white/10 hover:text-white'
-                                        : 'opacity-40 cursor-not-allowed text-slate-600'
-                                }`}
+                                            ? 'glass-panel text-slate-300 hover:bg-white/10 hover:text-white'
+                                            : 'opacity-40 cursor-not-allowed text-slate-600'
+                                    }`}
                                 dangerouslySetInnerHTML={{ __html: link.label }}
                             />
                         ))}

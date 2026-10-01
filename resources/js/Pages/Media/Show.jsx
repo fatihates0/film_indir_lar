@@ -202,7 +202,6 @@ export default function MediaShow({
                                             onClick={() => setMediaInfoModal(highestVersion)}
                                             className="px-7 py-4 rounded-2xl glass-panel text-white font-bold text-sm hover:border-white/30 transition-all flex items-center gap-2"
                                         >
-                                            <span className="text-indigo-400 text-base">📋</span>
                                             Media Info
                                         </button>
                                     </div>
@@ -291,7 +290,6 @@ export default function MediaShow({
                                                 onClick={() => setMediaInfoModal(ep)}
                                                 className="px-4 py-2.5 rounded-xl glass-panel text-slate-200 text-xs font-bold hover:text-white transition-all flex items-center gap-2"
                                             >
-                                                <span className="text-indigo-400 text-sm">📋</span>
                                                 Media Info
                                             </button>
 
@@ -356,7 +354,6 @@ export default function MediaShow({
                                             onClick={() => setMediaInfoModal(ver)}
                                             className="px-4 py-2.5 rounded-xl glass-panel text-slate-200 text-xs font-bold hover:text-white transition-all flex items-center gap-2"
                                         >
-                                            <span className="text-indigo-400 text-sm">📋</span>
                                             Media Info
                                         </button>
 
@@ -542,9 +539,6 @@ export default function MediaShow({
                         <div className="w-full max-w-2xl glass-panel rounded-3xl border border-white/15 p-6 shadow-2xl space-y-6 text-left relative max-h-[90vh] overflow-y-auto">
                             <div className="flex items-start justify-between border-b border-white/10 pb-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 text-xl font-bold">
-                                        📋
-                                    </div>
                                     <div>
                                         <h3 className="font-display font-bold text-lg text-white">Media Info Detayları</h3>
                                         <p className="text-xs text-slate-400 font-mono truncate max-w-md">{mediaInfoModal.file_name}</p>

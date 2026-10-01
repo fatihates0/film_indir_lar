@@ -208,7 +208,7 @@ class MediaScannerService
 
         $scanPath = $subDirectory ? $this->storageBoxService->resolveRealPath($subDirectory, $storageBox) : $mountPath;
 
-        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov', 'webm', 'flv'];
+        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'm2ts', 'mov', 'webm', 'flv', 'wmv', 'vob', 'ogv', 'divx', '3gp', 'rmvb', 'asf', 'mpg', 'mpeg', 'm2v', 'iso'];
         $scannedPaths = [];
         $added = 0;
         $updated = 0;
@@ -381,7 +381,7 @@ class MediaScannerService
         $pass = $storageBox->password;
         $host = $storageBox->host;
 
-        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov', 'webm', 'flv'];
+        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'm2ts', 'mov', 'webm', 'flv', 'wmv', 'vob', 'ogv', 'divx', '3gp', 'rmvb', 'asf', 'mpg', 'mpeg', 'm2v', 'iso'];
         $scannedPaths = [];
         $added = 0;
         $updated = 0;

@@ -67,6 +67,28 @@ class MediaController extends Controller
                 return $score;
             })->first();
 
+            $highestQualityItem = $items->sortByDesc(function ($item) {
+                $score = 0;
+                $qLabel = strtolower($item->quality_label ?? '');
+                $cleanName = strtolower($item->file_name ?? '');
+
+                if (preg_match('/2160p|4k|uhd/i', $qLabel) || Str::contains($cleanName, ['2160p', '4k', 'uhd'])) {
+                    $score = 600;
+                } elseif (Str::contains($qLabel, 'remux') || Str::contains($cleanName, 'remux')) {
+                    $score = 500;
+                } elseif (str_contains($qLabel, '1080p') || Str::contains($cleanName, '1080p')) {
+                    $score = 400;
+                } elseif (str_contains($qLabel, 'm1080p') || Str::contains($cleanName, 'm1080p')) {
+                    $score = 300;
+                } elseif (str_contains($qLabel, '720p') || Str::contains($cleanName, '720p')) {
+                    $score = 200;
+                }
+
+                return $score * 10000000000 + ($item->file_size ?? 0);
+            })->first();
+
+            $rep->highest_quality_id = $highestQualityItem ? $highestQualityItem->id : $rep->id;
+
             $qualities = $items->pluck('quality_label')->unique()->values()->toArray();
             $seasons = $items->pluck('season_number')->filter()->unique()->sort()->values()->toArray();
             $episodesCount = $items->pluck('episode_number')->filter()->unique()->count();

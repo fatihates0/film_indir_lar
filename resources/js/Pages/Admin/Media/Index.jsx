@@ -6,7 +6,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
     const flash = usePage().props.flash;
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
-    const [perPage, setPerPage] = useState(filters.per_page || '15');
+    const [perPage, setPerPage] = useState(filters.per_page || '10');
     const [expandedGroups, setExpandedGroups] = useState({});
 
     const toggleGroupExpand = (id) => {
@@ -58,7 +58,15 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
     const [syncingId, setSyncingId] = useState(null);
 
     const [selectedIds, setSelectedIds] = useState([]);
+    const [selectionMode, setSelectionMode] = useState(false);
     const [deletingBulk, setDeletingBulk] = useState(false);
+
+    const showCheckboxes = selectionMode || selectedIds.length > 0;
+
+    const clearSelection = () => {
+        setSelectedIds([]);
+        setSelectionMode(false);
+    };
 
     const getAllPageVersionIds = () => {
         const ids = [];
@@ -89,6 +97,20 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
         }
     };
 
+    const handleHeaderCheckboxClick = () => {
+        if (!showCheckboxes) {
+            setSelectionMode(true);
+            const allIds = getAllPageVersionIds();
+            setSelectedIds(allIds);
+        } else {
+            if (isAllSelected()) {
+                clearSelection();
+            } else {
+                toggleSelectAll();
+            }
+        }
+    };
+
     const getGroupVersionIds = (m) => {
         return m.versions && m.versions.length > 0 ? m.versions.map((v) => v.id) : [m.id];
     };
@@ -109,7 +131,9 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
 
     const toggleSelectId = (id) => {
         if (selectedIds.includes(id)) {
-            setSelectedIds(selectedIds.filter((item) => item !== id));
+            const next = selectedIds.filter((item) => item !== id);
+            setSelectedIds(next);
+            if (next.length === 0) setSelectionMode(false);
         } else {
             setSelectedIds([...selectedIds, id]);
         }
@@ -121,7 +145,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
             setDeletingBulk(true);
             router.post(route('admin.media.bulk-delete'), { ids: selectedIds }, {
                 onSuccess: () => {
-                    setSelectedIds([]);
+                    clearSelection();
                     setDeletingBulk(false);
                 },
                 onError: () => setDeletingBulk(false),
@@ -135,13 +159,81 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                 setDeletingBulk(true);
                 router.post(route('admin.media.bulk-delete'), { delete_all: true }, {
                     onSuccess: () => {
-                        setSelectedIds([]);
+                        clearSelection();
                         setDeletingBulk(false);
                     },
                     onError: () => setDeletingBulk(false),
                 });
             }
         }
+    };
+
+    const [selectDropdownOpen, setSelectDropdownOpen] = useState(false);
+
+    const selectByFilter = (filterType) => {
+        setSelectDropdownOpen(false);
+        if (!media?.data) return;
+
+        if (filterType === 'none') {
+            clearSelection();
+            return;
+        }
+
+        let targetIds = [];
+
+        if (filterType === 'all') {
+            targetIds = getAllPageVersionIds();
+        } else if (filterType === 'missing_tmdb') {
+            media.data.forEach((m) => {
+                if (!m.tmdb_id) {
+                    targetIds.push(...getGroupVersionIds(m));
+                }
+            });
+        } else if (filterType === 'movies') {
+            media.data.forEach((m) => {
+                if (m.type === 'movie' || (!m.type && !m.group_info?.is_series)) {
+                    targetIds.push(...getGroupVersionIds(m));
+                }
+            });
+        } else if (filterType === 'series') {
+            media.data.forEach((m) => {
+                if (m.type === 'series' || m.type === 'episode' || m.group_info?.is_series) {
+                    targetIds.push(...getGroupVersionIds(m));
+                }
+            });
+        } else if (filterType === 'inactive') {
+            media.data.forEach((m) => {
+                if (m.versions && m.versions.length > 0) {
+                    m.versions.forEach((v) => {
+                        if (!v.is_active) targetIds.push(v.id);
+                    });
+                } else if (!m.is_active) {
+                    targetIds.push(m.id);
+                }
+            });
+        } else if (filterType === 'zero_size') {
+            const isZeroSizeBytes = (bytes) => {
+                if (bytes === null || bytes === undefined || bytes === '' || Number(bytes) === 0) return true;
+                const gb = Number(bytes) / 1073741824;
+                return gb < 0.01;
+            };
+
+            media.data.forEach((m) => {
+                const groupTotalBytes = m.group_info?.total_size_bytes ?? m.file_size ?? 0;
+                if (isZeroSizeBytes(groupTotalBytes)) {
+                    targetIds.push(...getGroupVersionIds(m));
+                } else if (m.versions && m.versions.length > 0) {
+                    m.versions.forEach((v) => {
+                        if (isZeroSizeBytes(v.file_size)) {
+                            targetIds.push(v.id);
+                        }
+                    });
+                }
+            });
+        }
+
+        setSelectedIds(targetIds);
+        setSelectionMode(targetIds.length > 0);
     };
 
     const openPicker = () => {
@@ -408,6 +500,88 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                     Ara
                                 </button>
                             </form>
+
+                            {/* Toplu Seçim Dropdown */}
+                            <div className="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectDropdownOpen(!selectDropdownOpen)}
+                                    className="inline-flex items-center gap-1.5 bg-slate-950 hover:bg-slate-900 text-indigo-300 border border-indigo-500/30 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all shadow-sm"
+                                >
+                                    <span>Toplu Seçim</span>
+                                    <svg className={`w-3.5 h-3.5 transition-transform duration-200 ${selectDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+
+                                {selectDropdownOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-20" onClick={() => setSelectDropdownOpen(false)}></div>
+                                        <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl py-1.5 z-30 divide-y divide-slate-800/60 text-xs">
+                                            <div className="py-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('missing_tmdb')}
+                                                    className="w-full text-left px-4 py-2 text-amber-400 hover:bg-slate-800/80 font-medium flex items-center justify-between transition-colors"
+                                                >
+                                                    <span>TMDB Eksik Olanları Seç</span>
+                                                    <span className="text-[10px] bg-amber-400/10 border border-amber-400/30 px-1.5 py-0.5 rounded font-mono">Filtre</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('zero_size')}
+                                                    className="w-full text-left px-4 py-2 text-rose-400 hover:bg-slate-800/80 font-medium flex items-center justify-between transition-colors"
+                                                >
+                                                    <span>Boyutu 0 GB Olanları Seç</span>
+                                                    <span className="text-[10px] bg-rose-400/10 border border-rose-400/30 px-1.5 py-0.5 rounded font-mono">0 GB</span>
+                                                </button>
+                                            </div>
+
+                                            <div className="py-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('movies')}
+                                                    className="w-full text-left px-4 py-2 text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors"
+                                                >
+                                                    Sadece Filmleri Seç
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('series')}
+                                                    className="w-full text-left px-4 py-2 text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors"
+                                                >
+                                                    Sadece Dizileri Seç
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('inactive')}
+                                                    className="w-full text-left px-4 py-2 text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors"
+                                                >
+                                                    Pasif İçerikleri Seç
+                                                </button>
+                                            </div>
+
+                                            <div className="py-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('all')}
+                                                    className="w-full text-left px-4 py-2 text-indigo-400 hover:bg-slate-800/80 font-semibold transition-colors"
+                                                >
+                                                    Tümünü Seç
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectByFilter('none')}
+                                                    className="w-full text-left px-4 py-2 text-slate-400 hover:bg-slate-800/80 transition-colors"
+                                                >
+                                                    Seçimi Temizle
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
                             <div className="flex items-center gap-2 text-xs text-slate-400">
                                 <span>Göster:</span>
                                 <select
@@ -415,6 +589,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                     onChange={handlePerPageChange}
                                     className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
                                 >
+                                    <option value="10">10 / sayfa</option>
                                     <option value="15">15 / sayfa</option>
                                     <option value="30">30 / sayfa</option>
                                     <option value="50">50 / sayfa</option>
@@ -429,15 +604,18 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                         <table className="w-full text-left text-xs text-slate-300">
                             <thead className="bg-slate-950/80 text-[11px] font-semibold uppercase text-slate-400 border-b border-slate-800">
                                 <tr>
-                                    <th className="px-3 py-3.5 w-10 text-center">
-                                        <input
-                                            type="checkbox"
-                                            checked={isAllSelected()}
-                                            onChange={toggleSelectAll}
-                                            className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                                        />
+                                    <th className="px-4 py-3.5">
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={showCheckboxes && isAllSelected()}
+                                                onChange={handleHeaderCheckboxClick}
+                                                title={showCheckboxes ? 'Tümünü Seç / Seçimi Kaldır' : 'Toplu Seçimi Etkinleştir'}
+                                                className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                                            />
+                                            <span>Afiş & Başlık</span>
+                                        </div>
                                     </th>
-                                    <th className="px-4 py-3.5">Afiş & Başlık</th>
                                     <th className="px-4 py-3.5">TMDB Durum</th>
                                     <th className="px-4 py-3.5">Tür</th>
                                     <th className="px-4 py-3.5">Storage Box</th>
@@ -449,7 +627,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                             <tbody className="divide-y divide-slate-800/60">
                                 {media.data.length === 0 ? (
                                     <tr>
-                                        <td colSpan="8" className="px-6 py-12 text-center text-slate-500">
+                                        <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
                                             Kütüphanenizde henüz medya bulunmuyor. "Dosya Seç & Medya Ekle" butonundan ekleyebilirsiniz.
                                         </td>
                                     </tr>
@@ -467,22 +645,21 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                             <Fragment key={m.id}>
                                                 <tr
                                                     onClick={() => toggleGroupExpand(m.id)}
-                                                    className={`hover:bg-slate-800/40 transition-colors cursor-pointer border-b border-slate-800/50 ${
-                                                        isExpanded ? 'bg-slate-900/80' : ''
-                                                    }`}
+                                                    className={`hover:bg-slate-800/40 transition-colors cursor-pointer border-b border-slate-800/50 ${isExpanded ? 'bg-slate-900/80' : ''
+                                                        }`}
                                                 >
-                                                    {/* Checkbox */}
-                                                    <td className="px-3 py-3 w-10 text-center" onClick={(e) => e.stopPropagation()}>
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isGroupSelected(m)}
-                                                            onChange={() => toggleSelectGroup(m)}
-                                                            className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                                                        />
-                                                    </td>
                                                     {/* İçerik Başlığı & Detay */}
                                                     <td className="px-4 py-3">
                                                         <div className="flex items-center gap-3">
+                                                            {showCheckboxes && (
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={isGroupSelected(m)}
+                                                                    onChange={() => toggleSelectGroup(m)}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer shrink-0"
+                                                                />
+                                                            )}
                                                             <button
                                                                 type="button"
                                                                 onClick={(e) => {
@@ -562,11 +739,10 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                 e.stopPropagation();
                                                                 toggleActive(m.id);
                                                             }}
-                                                            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
-                                                                m.is_active
+                                                            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${m.is_active
                                                                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                                                                     : 'bg-slate-800 text-slate-400 border border-slate-700'
-                                                            }`}
+                                                                }`}
                                                         >
                                                             {m.is_active ? 'Aktif' : 'Pasif'}
                                                         </button>
@@ -613,7 +789,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                 {/* NESTED VERSIONS LIST - FLUSH & SEAMLESS */}
                                                 {isExpanded && (
                                                     <tr className="bg-slate-950/90">
-                                                        <td colSpan="8" className="p-0">
+                                                        <td colSpan={7} className="p-0">
                                                             <div className="bg-slate-950/80 border-b border-slate-800">
                                                                 {(() => {
                                                                     const isSeriesGroup = m.type === 'series' || m.type === 'episode' || m.group_info?.is_series;
@@ -660,12 +836,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                         >
                                                                                             <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
                                                                                                 <span className="text-slate-600 text-xs font-mono select-none">└</span>
-                                                                                                <input
-                                                                                                    type="checkbox"
-                                                                                                    checked={selectedIds.includes(ver.id)}
-                                                                                                    onChange={() => toggleSelectId(ver.id)}
-                                                                                                    className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer shrink-0"
-                                                                                                />
+                                                                                                {showCheckboxes && (
+                                                                                                    <input
+                                                                                                        type="checkbox"
+                                                                                                        checked={selectedIds.includes(ver.id)}
+                                                                                                        onChange={() => toggleSelectId(ver.id)}
+                                                                                                        className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                                                                    />
+                                                                                                )}
                                                                                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
                                                                                                     {ver.quality_label}
                                                                                                 </span>
@@ -682,11 +860,10 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                                 <button
                                                                                                     type="button"
                                                                                                     onClick={() => toggleActive(ver.id)}
-                                                                                                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
-                                                                                                        ver.is_active
+                                                                                                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${ver.is_active
                                                                                                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                                                                                                             : 'bg-slate-800 text-slate-500 border border-slate-700'
-                                                                                                    }`}
+                                                                                                        }`}
                                                                                                 >
                                                                                                     {ver.is_active ? 'Aktif' : 'Pasif'}
                                                                                                 </button>
@@ -724,12 +901,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                 >
                                                                                     <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
                                                                                         <span className="text-slate-600 text-xs font-mono select-none">└</span>
-                                                                                        <input
-                                                                                            type="checkbox"
-                                                                                            checked={selectedIds.includes(ver.id)}
-                                                                                            onChange={() => toggleSelectId(ver.id)}
-                                                                                            className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer shrink-0"
-                                                                                        />
+                                                                                        {showCheckboxes && (
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                checked={selectedIds.includes(ver.id)}
+                                                                                                onChange={() => toggleSelectId(ver.id)}
+                                                                                                className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                                                            />
+                                                                                        )}
                                                                                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
                                                                                             {ver.quality_label}
                                                                                         </span>
@@ -746,11 +925,10 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                         <button
                                                                                             type="button"
                                                                                             onClick={() => toggleActive(ver.id)}
-                                                                                            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
-                                                                                                ver.is_active
+                                                                                            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${ver.is_active
                                                                                                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                                                                                                     : 'bg-slate-800 text-slate-500 border border-slate-700'
-                                                                                            }`}
+                                                                                                }`}
                                                                                         >
                                                                                             {ver.is_active ? 'Aktif' : 'Pasif'}
                                                                                         </button>
@@ -802,13 +980,12 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                         href={link.url || '#'}
                                         preserveScroll
                                         dangerouslySetInnerHTML={{ __html: link.label }}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                                            link.active
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${link.active
                                                 ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/30'
                                                 : link.url
-                                                ? 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-                                                : 'bg-slate-900/50 text-slate-600 cursor-not-allowed pointer-events-none'
-                                        }`}
+                                                    ? 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                                                    : 'bg-slate-900/50 text-slate-600 cursor-not-allowed pointer-events-none'
+                                            }`}
                                     />
                                 ))}
                             </div>
@@ -845,9 +1022,8 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                 <div>
                                                     <div className="flex items-center gap-2">
                                                         <span className="font-bold text-white group-hover:text-indigo-400 transition-colors">{box.name}</span>
-                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                                            box.status === 'online' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                                                        }`}>
+                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${box.status === 'online' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                                                            }`}>
                                                             {box.status}
                                                         </span>
                                                     </div>
@@ -900,11 +1076,10 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                     <div
                                                         key={item.id}
                                                         onClick={() => selectTmdbCandidate(item)}
-                                                        className={`p-2.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
-                                                            addForm.tmdb_id === item.id
+                                                        className={`p-2.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${addForm.tmdb_id === item.id
                                                                 ? 'bg-indigo-600/20 border-indigo-500 ring-2 ring-indigo-500/50'
                                                                 : 'bg-slate-900 border-slate-800 hover:border-slate-700'
-                                                        }`}
+                                                            }`}
                                                     >
                                                         {item.poster_path ? (
                                                             <img src={`https://image.tmdb.org/t/p/w92${item.poster_path}`} alt="" className="w-9 h-12 object-cover rounded-md" />

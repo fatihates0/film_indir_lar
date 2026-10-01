@@ -171,7 +171,7 @@ class MediaAdminController extends Controller
         $grouped = $grouped->sortByDesc('id')->values();
 
         $page = (int) $request->input('page', 1);
-        $perPageInput = $request->input('per_page', 15);
+        $perPageInput = $request->input('per_page', 10);
         if ($perPageInput === 'all') {
             $perPage = max(1, $grouped->count());
         } else {

@@ -52,7 +52,6 @@ class StorageBoxAdminController extends Controller
             }
 
             $mediaUsedBytes = (float) ($box->media_sum_file_size ?? 0);
-            $totalUsedBytes += $mediaUsedBytes;
 
             $manualCapGb = isset($box->metadata['capacity_gb']) && is_numeric($box->metadata['capacity_gb'])
                 ? (float) $box->metadata['capacity_gb']
@@ -60,41 +59,44 @@ class StorageBoxAdminController extends Controller
 
             $capacityBytes = null;
             $freeBytes = null;
+            $usedBytes = $mediaUsedBytes;
             $capacitySource = 'none';
 
             if (! empty($manualCapGb) && $manualCapGb > 0) {
                 $capacityBytes = (float) $manualCapGb * 1073741824;
                 $capacitySource = 'manual';
-                $freeBytes = max(0, $capacityBytes - $mediaUsedBytes);
-            } elseif (! empty($box->mount_path) && file_exists($box->mount_path)) {
-                $diskTotal = @disk_total_space($box->mount_path);
-                $diskFree = @disk_free_space($box->mount_path);
-                if ($diskTotal !== false && $diskTotal > 0) {
-                    $capacityBytes = (float) $diskTotal;
-                    $capacitySource = 'auto';
-                    $freeBytes = $diskFree !== false ? (float) $diskFree : null;
+                $freeBytes = max(0, $capacityBytes - $usedBytes);
+            } else {
+                $normalizedMount = str_replace('\\', '/', trim($box->mount_path ?? ''));
+                $isRootDisk = in_array(strtolower($normalizedMount), ['', '/', 'c:', 'c:/', 'd:', 'd:/', 'e:', 'e:/', '/home', '/var']);
+
+                if (! $isRootDisk && ! empty($box->mount_path) && file_exists($box->mount_path)) {
+                    $diskTotal = @disk_total_space($box->mount_path);
+                    $diskFree = @disk_free_space($box->mount_path);
+                    if ($diskTotal !== false && $diskTotal > 0) {
+                        $capacityBytes = (float) $diskTotal;
+                        $capacitySource = 'auto';
+                        if ($diskFree !== false) {
+                            $freeBytes = (float) $diskFree;
+                            $diskUsed = max(0, $capacityBytes - $freeBytes);
+                            $usedBytes = max($mediaUsedBytes, $diskUsed);
+                        }
+                    }
                 }
             }
 
-            if ($capacityBytes !== null) {
+            $totalUsedBytes += $usedBytes;
+
+            if ($capacityBytes !== null && $capacityBytes > 0) {
                 $hasKnownCapacity = true;
                 $totalCapacityBytes += $capacityBytes;
                 if ($freeBytes !== null) {
                     $totalFreeBytes += $freeBytes;
                 }
+                $usagePercent = round(($usedBytes / $capacityBytes) * 100, 1);
+            } else {
+                $usagePercent = null;
             }
-
-            $mediaUsagePercent = ($capacityBytes && $capacityBytes > 0)
-                ? round(($mediaUsedBytes / $capacityBytes) * 100, 1)
-                : null;
-
-            $diskUsedBytes = ($capacityBytes !== null && $freeBytes !== null)
-                ? max(0, $capacityBytes - $freeBytes)
-                : null;
-
-            $diskUsagePercent = ($capacityBytes && $capacityBytes > 0 && $diskUsedBytes !== null)
-                ? round(($diskUsedBytes / $capacityBytes) * 100, 1)
-                : null;
 
             return [
                 'id' => $box->id,
@@ -110,9 +112,9 @@ class StorageBoxAdminController extends Controller
                 'is_active' => $box->is_active,
                 'status' => $box->status,
                 'media_count' => $box->media_count,
-                'total_gb' => round($mediaUsedBytes / 1073741824, 2),
-                'used_bytes' => $mediaUsedBytes,
-                'used_formatted' => $this->formatBytes($mediaUsedBytes),
+                'total_gb' => round($usedBytes / 1073741824, 2),
+                'used_bytes' => $usedBytes,
+                'used_formatted' => $this->formatBytes($usedBytes),
                 'capacity_gb' => $manualCapGb ?: ($capacityBytes ? round($capacityBytes / 1073741824, 2) : null),
                 'capacity_bytes' => $capacityBytes,
                 'capacity_formatted' => $capacityBytes ? $this->formatBytes($capacityBytes) : 'Bilinmiyor',
@@ -120,9 +122,9 @@ class StorageBoxAdminController extends Controller
                 'free_bytes' => $freeBytes,
                 'free_formatted' => $freeBytes !== null ? $this->formatBytes($freeBytes) : 'Bilinmiyor',
                 'free_gb' => $freeBytes !== null ? round($freeBytes / 1073741824, 2) : null,
-                'media_usage_percent' => $mediaUsagePercent,
-                'disk_usage_percent' => $diskUsagePercent,
-                'usage_percent' => $capacitySource === 'auto' ? $diskUsagePercent : $mediaUsagePercent,
+                'media_usage_percent' => $usagePercent,
+                'disk_usage_percent' => $usagePercent,
+                'usage_percent' => $usagePercent,
             ];
         });
 
@@ -166,7 +168,7 @@ class StorageBoxAdminController extends Controller
                 'transferred_formatted' => $this->remoteTransferService->formatBytes($t->transferred_bytes),
                 'progress_percent' => $t->progress_percent,
                 'speed_bps' => $t->speed_bps,
-                'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps) . '/s',
+                'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps).'/s',
                 'status' => $t->status,
                 'error_message' => $t->error_message,
                 'media_id' => $t->media_id,
@@ -191,7 +193,7 @@ class StorageBoxAdminController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'mount_path' => ['required', 'string', 'max:500'],
+            'mount_path' => ['nullable', 'string', 'max:500'],
             'disk_type' => ['required', 'string', 'in:cifs,sshfs,local'],
             'host' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', 'max:255'],
@@ -210,7 +212,9 @@ class StorageBoxAdminController extends Controller
 
         $validated['slug'] = Str::slug($validated['name']);
         $validated['is_active'] = true;
-        $validated['status'] = file_exists($validated['mount_path']) ? 'online' : 'offline';
+
+        $tempBox = new StorageBox($validated);
+        $validated['status'] = $this->storageBoxService->isMounted($tempBox) ? 'online' : 'offline';
 
         $box = StorageBox::create($validated);
 
@@ -228,7 +232,7 @@ class StorageBoxAdminController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'mount_path' => ['required', 'string', 'max:500'],
+            'mount_path' => ['nullable', 'string', 'max:500'],
             'disk_type' => ['required', 'string', 'in:cifs,sshfs,local'],
             'host' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', 'max:255'],
@@ -282,7 +286,7 @@ class StorageBoxAdminController extends Controller
         $i = (int) floor(log($bytes, 1024));
         $i = min(max(0, $i), count($units) - 1);
 
-        return round($bytes / pow(1024, $i), 2) . ' ' . $units[$i];
+        return round($bytes / pow(1024, $i), 2).' '.$units[$i];
     }
 
     public function destroy(StorageBox $storageBox): RedirectResponse
@@ -358,7 +362,7 @@ class StorageBoxAdminController extends Controller
         }
 
         // Physical directory & file creation on the Storage Box mount path
-        $fullPath = rtrim($storageBox->mount_path, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+        $fullPath = rtrim($storageBox->mount_path, '/\\').DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
         $dir = dirname($fullPath);
         if (! file_exists($dir)) {
             mkdir($dir, 0755, true);
@@ -418,7 +422,7 @@ class StorageBoxAdminController extends Controller
     public function browse(StorageBox $storageBox, Request $request)
     {
         $relativePath = trim($request->query('path', ''), '/\\');
-        $cacheKey = "storage_box_browse_{$storageBox->id}_" . md5($relativePath);
+        $cacheKey = "storage_box_browse_{$storageBox->id}_".md5($relativePath);
 
         if ($request->boolean('refresh')) {
             Cache::forget($cacheKey);
@@ -431,7 +435,7 @@ class StorageBoxAdminController extends Controller
             try {
                 $fullPath = $this->storageBoxService->resolveRealPath($relativePath, $storageBox);
                 if (file_exists($fullPath) && is_dir($fullPath)) {
-                    $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov'];
+                    $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'm2ts', 'mov', 'webm', 'flv', 'wmv', 'vob', 'ogv', 'divx', '3gp', 'rmvb', 'asf', 'mpg', 'mpeg', 'm2v', 'iso'];
 
                     $existingMediaPaths = Media::where('storage_box_id', $storageBox->id)
                         ->pluck('id', 'file_path')
@@ -443,7 +447,7 @@ class StorageBoxAdminController extends Controller
                             continue;
                         }
 
-                        $itemFullPath = $fullPath . DIRECTORY_SEPARATOR . $item;
+                        $itemFullPath = $fullPath.DIRECTORY_SEPARATOR.$item;
                         $itemRelativePath = $relativePath ? "{$relativePath}/{$item}" : $item;
 
                         if (is_dir($itemFullPath)) {
@@ -460,7 +464,7 @@ class StorageBoxAdminController extends Controller
                                     'relative_path' => $itemRelativePath,
                                     'extension' => $ext,
                                     'size_bytes' => $sizeBytes,
-                                    'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2) . ' GB',
+                                    'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2).' GB',
                                     'is_added' => isset($existingMediaPaths[$itemRelativePath]),
                                     'media_id' => $existingMediaPaths[$itemRelativePath] ?? null,
                                 ];
@@ -533,23 +537,25 @@ class StorageBoxAdminController extends Controller
 
         if (! @\ftp_login($conn, $user, $pass)) {
             @\ftp_close($conn);
+
             return null;
         }
 
         @\ftp_pasv($conn, true);
 
-        $targetPath = '/' . trim(str_replace('\\', '/', $relativePath), '/');
+        $targetPath = '/'.trim(str_replace('\\', '/', $relativePath), '/');
 
         $rawItems = @\ftp_rawlist($conn, $targetPath ?: '.');
 
         if ($rawItems === false) {
             @\ftp_close($conn);
+
             return null;
         }
 
         $directories = [];
         $files = [];
-        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov'];
+        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'm2ts', 'mov', 'webm', 'flv', 'wmv', 'vob', 'ogv', 'divx', '3gp', 'rmvb', 'asf', 'mpg', 'mpeg', 'm2v', 'iso'];
 
         $existingMediaPaths = Media::where('storage_box_id', $storageBox->id)
             ->pluck('id', 'file_path')
@@ -587,7 +593,7 @@ class StorageBoxAdminController extends Controller
                         'relative_path' => $itemRelativePath,
                         'extension' => $ext,
                         'size_bytes' => $sizeBytes,
-                        'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2) . ' GB',
+                        'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2).' GB',
                         'is_added' => isset($existingMediaPaths[$itemRelativePath]),
                         'media_id' => $existingMediaPaths[$itemRelativePath] ?? null,
                     ];
@@ -632,12 +638,12 @@ class StorageBoxAdminController extends Controller
         $cleanPath = implode('/', array_map('rawurlencode', array_filter($pathSegments, fn ($s) => $s !== '')));
 
         if (! str_starts_with($host, 'http://') && ! str_starts_with($host, 'https://')) {
-            $url = "https://{$host}/" . ($cleanPath ? $cleanPath . '/' : '');
+            $url = "https://{$host}/".($cleanPath ? $cleanPath.'/' : '');
         } else {
-            $url = rtrim($host, '/') . '/' . ($cleanPath ? $cleanPath . '/' : '');
+            $url = rtrim($host, '/').'/'.($cleanPath ? $cleanPath.'/' : '');
         }
 
-        $url = rtrim($url, '/') . '/';
+        $url = rtrim($url, '/').'/';
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -669,7 +675,7 @@ class StorageBoxAdminController extends Controller
 
         $directories = [];
         $files = [];
-        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'mov'];
+        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'm2ts', 'mov', 'webm', 'flv', 'wmv', 'vob', 'ogv', 'divx', '3gp', 'rmvb', 'asf', 'mpg', 'mpeg', 'm2v', 'iso'];
 
         $existingMediaPaths = Media::where('storage_box_id', $storageBox->id)
             ->pluck('id', 'file_path')
@@ -720,7 +726,7 @@ class StorageBoxAdminController extends Controller
                             'relative_path' => $itemRelativePath,
                             'extension' => $ext,
                             'size_bytes' => $sizeBytes,
-                            'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2) . ' GB',
+                            'size_formatted' => round($sizeBytes / (1024 * 1024 * 1024), 2).' GB',
                             'is_added' => isset($existingMediaPaths[$itemRelativePath]),
                             'media_id' => $existingMediaPaths[$itemRelativePath] ?? null,
                         ];
@@ -790,7 +796,7 @@ class StorageBoxAdminController extends Controller
             return back()->withErrors(['storage_box_id' => $e->getMessage()]);
         }
 
-        $relativePath = ($folder ? $folder . '/' : '') . $fileName;
+        $relativePath = ($folder ? $folder.'/' : '').$fileName;
 
         // Check if identical file with same name and same size already exists
         $existingSize = ($totalBytes > 0)
@@ -934,7 +940,7 @@ class StorageBoxAdminController extends Controller
             'transferred_formatted' => $this->remoteTransferService->formatBytes($t->transferred_bytes),
             'progress_percent' => $t->progress_percent,
             'speed_bps' => $t->speed_bps,
-            'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps) . '/s',
+            'speed_formatted' => $this->remoteTransferService->formatBytes($t->speed_bps).'/s',
             'status' => $t->status,
             'error_message' => $t->error_message,
             'media_id' => $t->media_id,
@@ -1025,4 +1031,3 @@ class StorageBoxAdminController extends Controller
         return response()->json(['status' => 'success']);
     }
 }
-

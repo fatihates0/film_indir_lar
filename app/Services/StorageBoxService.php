@@ -22,7 +22,7 @@ class StorageBoxService
      */
     public function resolveRealPath(string $relativePath, ?StorageBox $storageBox = null): string
     {
-        $baseMount = $storageBox ? $storageBox->mount_path : $this->defaultMountPath;
+        $baseMount = ($storageBox && ! empty($storageBox->mount_path)) ? $storageBox->mount_path : $this->defaultMountPath;
 
         $normalizedRelative = str_replace(['\\', '../', '..\\'], ['/', '', ''], $relativePath);
         $normalizedRelative = ltrim($normalizedRelative, '/');

@@ -506,7 +506,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                         <div><span className="text-slate-500">Host:</span> <strong className="text-slate-200">{box.host || 'Belirtilmedi'}</strong></div>
                                         <div><span className="text-slate-500">Kullanıcı:</span> <strong className="text-slate-200">{box.username || 'Belirtilmedi'}</strong></div>
                                         <div><span className="text-slate-500">Şifre:</span> <strong className="text-emerald-400">{box.has_password ? '•••••••• (Şifrelenmiş)' : 'Yok'}</strong></div>
-                                        <div><span className="text-slate-500">Mount Yolu:</span> <strong className="text-indigo-300 break-all">{box.mount_path}</strong></div>
+                                        <div><span className="text-slate-500">Mount Yolu:</span> <strong className="text-indigo-300 break-all">{box.mount_path || 'Belirtilmedi (Standart)'}</strong></div>
                                     </div>
 
                                     {/* Storage Capacity & Used Statistics */}
@@ -1008,15 +1008,19 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Mount Dizini (Sunucu Yolu)</label>
+                                        <label className="block font-semibold text-slate-300 mb-1">
+                                            Mount Dizini (Sunucu Yolu) <span className="text-slate-500 font-normal">(Opsiyonel)</span>
+                                        </label>
                                         <input
                                             type="text"
                                             value={boxForm.data.mount_path}
                                             onChange={(e) => boxForm.setData('mount_path', e.target.value)}
                                             className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                            placeholder="/mnt/storagebox1"
-                                            required
+                                            placeholder="/mnt/storagebox1 (İsteğe bağlı)"
                                         />
+                                        <p className="text-[11px] text-slate-500 mt-1">
+                                            Sunucunuza yerel olarak bağladıysanız yazabilirsiniz. Boş bırakılırsa varsayılan mod çalışır.
+                                        </p>
                                     </div>
                                 </div>
 
@@ -1115,13 +1119,15 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                 </div>
 
                                 <div>
-                                    <label className="block font-semibold text-slate-300 mb-1">Mount Dizini</label>
+                                    <label className="block font-semibold text-slate-300 mb-1">
+                                        Mount Dizini (Sunucu Yolu) <span className="text-slate-500 font-normal">(Opsiyonel)</span>
+                                    </label>
                                     <input
                                         type="text"
                                         value={editForm.data.mount_path}
                                         onChange={(e) => editForm.setData('mount_path', e.target.value)}
                                         className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono text-xs"
-                                        required
+                                        placeholder="/mnt/storagebox1 (İsteğe bağlı)"
                                     />
                                 </div>
 
