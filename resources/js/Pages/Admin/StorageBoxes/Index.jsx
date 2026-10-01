@@ -56,28 +56,61 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
         auto_add_media: true,
     });
 
+    const [testingConn, setTestingConn] = useState(false);
+    const [connResult, setConnResult] = useState(null);
+
+    const handleDiskTypeChange = (type, isEdit = false) => {
+        let defaultPort = 443;
+        if (type === 'sftp' || type === 'pulsedmedia') defaultPort = 22;
+        else if (type === 'hetzner_webdav' || type === 'webdav') defaultPort = 443;
+        else if (type === 'ftp') defaultPort = 21;
+        else if (type === 'cifs_local' || type === 'cifs') defaultPort = 445;
+
+        if (isEdit) {
+            editForm.setData(prev => ({ ...prev, disk_type: type, port: defaultPort }));
+        } else {
+            boxForm.setData(prev => ({ ...prev, disk_type: type, port: defaultPort }));
+        }
+    };
+
+    const handleTestConn = async (formData) => {
+        setTestingConn(true);
+        setConnResult(null);
+        try {
+            const res = await axios.post(route('admin.storage-boxes.test-connection'), formData);
+            setConnResult(res.data);
+        } catch (err) {
+            setConnResult({
+                success: false,
+                message: 'Test bağlantısı sırasında hata oluştu: ' + (err.response?.data?.message || err.message)
+            });
+        } finally {
+            setTestingConn(false);
+        }
+    };
+
     // Storage Box Form
     const boxForm = useForm({
         name: '',
         mount_path: '',
-        disk_type: 'cifs',
+        disk_type: 'sftp',
         host: '',
         username: '',
         password: '',
-        port: 445,
-        share_name: 'backup',
+        port: 22,
+        share_name: '',
         capacity_gb: '',
     });
 
     const editForm = useForm({
         name: '',
         mount_path: '',
-        disk_type: 'cifs',
+        disk_type: 'sftp',
         host: '',
         username: '',
         password: '',
-        port: 445,
-        share_name: 'backup',
+        port: 22,
+        share_name: '',
         is_active: true,
         capacity_gb: '',
     });
@@ -510,7 +543,19 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                     <div className="flex justify-between items-start">
                                         <div>
                                             <h3 className="text-lg font-bold text-white">{box.name}</h3>
-                                            <span className="text-xs font-mono text-indigo-400 uppercase">{box.disk_type}</span>
+                                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border uppercase font-mono ${
+                                                    box.disk_type === 'sftp' || box.disk_type === 'pulsedmedia'
+                                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                        : box.disk_type === 'hetzner_webdav' || box.disk_type === 'hetzner'
+                                                        ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                                                        : box.disk_type === 'ftp'
+                                                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                                        : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                                                }`}>
+                                                    {box.disk_type === 'sftp' ? 'SFTP / SSH (PulsedMedia)' : box.disk_type === 'hetzner_webdav' ? 'Hetzner WebDAV' : (box.disk_type || 'LOCAL').toUpperCase()}
+                                                </span>
+                                            </div>
                                         </div>
                                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
                                             box.status === 'online'
@@ -1023,9 +1068,9 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                             <div className="flex justify-between items-start">
                                 <div>
                                     <h3 className="text-lg font-bold text-white">Yeni Storage Box Ekle</h3>
-                                    <p className="text-xs text-slate-400">Hetzner sunucu adresi, kullanıcı adı ve şifresi tanımlayın.</p>
+                                    <p className="text-xs text-slate-400">PulsedMedia SFTP, Hetzner WebDAV, FTP veya yerel klasör bağlantınızı tanımlayın.</p>
                                 </div>
-                                <button onClick={() => setAddBoxModal(false)} className="text-slate-400 hover:text-white font-bold">&times;</button>
+                                <button onClick={() => { setAddBoxModal(false); setConnResult(null); }} className="text-slate-400 hover:text-white font-bold">&times;</button>
                             </div>
 
                             <form onSubmit={handleBoxSubmit} className="space-y-4 text-xs">
@@ -1036,9 +1081,36 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                         value={boxForm.data.name}
                                         onChange={(e) => boxForm.setData('name', e.target.value)}
                                         className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-medium focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                        placeholder="Örn: Storage Box 1 - Filmler"
+                                        placeholder="Örn: PulsedMedia 4TB veya Hetzner Box 1"
                                         required
                                     />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block font-semibold text-slate-300 mb-1">Bağlantı Türü / Protokol</label>
+                                        <select
+                                            value={boxForm.data.disk_type}
+                                            onChange={(e) => handleDiskTypeChange(e.target.value, false)}
+                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-indigo-500 focus:ring-indigo-500 text-xs font-semibold"
+                                        >
+                                            <option value="sftp">🚀 SFTP / SSH (PulsedMedia, Seedbox - Port 22)</option>
+                                            <option value="hetzner_webdav">📦 Hetzner Storage Box (WebDAV - Port 443)</option>
+                                            <option value="webdav">🌐 Özel WebDAV (HTTPS/HTTP)</option>
+                                            <option value="ftp">📁 FTP / FTPS (Port 21)</option>
+                                            <option value="cifs_local">💻 Yerel Mount / CIFS Dizin (Sunucu Yolu)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block font-semibold text-slate-300 mb-1">Port</label>
+                                        <input
+                                            type="number"
+                                            value={boxForm.data.port}
+                                            onChange={(e) => boxForm.setData('port', e.target.value)}
+                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white text-xs font-mono"
+                                            placeholder="22"
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
@@ -1049,8 +1121,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                             value={boxForm.data.host}
                                             onChange={(e) => boxForm.setData('host', e.target.value)}
                                             className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                            placeholder="uXXXXXX.your-storagebox.de"
-                                            required
+                                            placeholder="lt5-1-56-139...pulsedmedia.com veya uXXXXXX.your-storagebox.de"
                                         />
                                     </div>
                                     <div>
@@ -1060,57 +1131,21 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                             value={boxForm.data.username}
                                             onChange={(e) => boxForm.setData('username', e.target.value)}
                                             className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                            placeholder="uXXXXXX"
-                                            required
+                                            placeholder="Kullanıcı adınız"
                                         />
                                     </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Storage Box Parolası</label>
+                                        <label className="block font-semibold text-slate-300 mb-1">Storage Parolası</label>
                                         <input
                                             type="password"
                                             value={boxForm.data.password}
                                             onChange={(e) => boxForm.setData('password', e.target.value)}
                                             className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
                                             placeholder="Şifreniz (Veritabanında şifreli saklanır)"
-                                            required
                                         />
-                                    </div>
-                                    <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Port & Paylaşım Adı</label>
-                                        <div className="flex gap-2">
-                                            <input
-                                                type="number"
-                                                value={boxForm.data.port}
-                                                onChange={(e) => boxForm.setData('port', e.target.value)}
-                                                className="w-20 rounded-xl bg-slate-950 border-slate-800 text-white text-xs"
-                                                placeholder="445"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={boxForm.data.share_name}
-                                                onChange={(e) => boxForm.setData('share_name', e.target.value)}
-                                                className="flex-1 rounded-xl bg-slate-950 border-slate-800 text-white text-xs"
-                                                placeholder="backup"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block font-semibold text-slate-300 mb-1">Bağlantı Türü</label>
-                                        <select
-                                            value={boxForm.data.disk_type}
-                                            onChange={(e) => boxForm.setData('disk_type', e.target.value)}
-                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                        >
-                                            <option value="cifs">CIFS / SMB (Önerilen)</option>
-                                            <option value="sshfs">SSHFS</option>
-                                            <option value="local">Local Directory</option>
-                                        </select>
                                     </div>
                                     <div>
                                         <label className="block font-semibold text-slate-300 mb-1">
@@ -1121,11 +1156,8 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                             value={boxForm.data.mount_path}
                                             onChange={(e) => boxForm.setData('mount_path', e.target.value)}
                                             className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                            placeholder="/mnt/storagebox1 (İsteğe bağlı)"
+                                            placeholder="/mnt/storagebox1"
                                         />
-                                        <p className="text-[11px] text-slate-500 mt-1">
-                                            Sunucunuza yerel olarak bağladıysanız yazabilirsiniz. Boş bırakılırsa varsayılan mod çalışır.
-                                        </p>
                                     </div>
                                 </div>
 
@@ -1138,26 +1170,49 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                         value={boxForm.data.capacity_gb}
                                         onChange={(e) => boxForm.setData('capacity_gb', e.target.value)}
                                         className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                        placeholder="Örn: 1000 (1 TB için). Boş bırakılırsa diskten otomatik okunur."
+                                        placeholder="Örn: 4000 (4 TB için). Boş bırakılırsa sunucudan otomatik okunur."
                                         min="1"
                                     />
-                                    <p className="text-[11px] text-slate-500 mt-1">
-                                        Hetzner planınızın kapasitesini manuel yazabilirsiniz veya diskin otomatik hesaplanmasına izin verebilirsiniz.
-                                    </p>
                                 </div>
 
-                                <div className="pt-4 border-t border-slate-800 flex gap-2">
+                                {connResult && (
+                                    <div className={`p-3.5 rounded-2xl text-xs flex items-start gap-2.5 border transition-all ${
+                                        connResult.success 
+                                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                                            : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                    }`}>
+                                        <div className="font-bold text-sm leading-none">{connResult.success ? '✅' : '❌'}</div>
+                                        <div className="flex-1 space-y-1">
+                                            <p className="font-semibold">{connResult.message}</p>
+                                            {connResult.details?.total_space && (
+                                                <p className="text-[11px] opacity-80">
+                                                    Toplam Kapasite: <strong>{connResult.details.total_space}</strong> | Boş: <strong>{connResult.details.free_space}</strong> | Kullanılan: <strong>{connResult.details.used_space}</strong>
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="pt-4 border-t border-slate-800 flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={testingConn}
+                                        onClick={() => handleTestConn(boxForm.data)}
+                                        className="rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 px-3.5 py-2.5 text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                                    >
+                                        {testingConn ? '⚡ Test Ediliyor...' : '⚡ Bağlantıyı Test Et'}
+                                    </button>
                                     <button
                                         type="submit"
                                         disabled={boxForm.processing}
-                                        className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-500 transition-all disabled:opacity-50"
+                                        className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-500 transition-all disabled:opacity-50"
                                     >
                                         Storage Box Kaydet
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setAddBoxModal(false)}
-                                        className="rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white"
+                                        onClick={() => { setAddBoxModal(false); setConnResult(null); }}
+                                        className="rounded-xl bg-slate-800 px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-white"
                                     >
                                         İptal
                                     </button>
@@ -1176,7 +1231,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                     <h3 className="text-lg font-bold text-white">Storage Box Düzenle</h3>
                                     <p className="text-xs text-slate-400">{editBoxModal.name}</p>
                                 </div>
-                                <button onClick={() => setEditBoxModal(null)} className="text-slate-400 hover:text-white font-bold">&times;</button>
+                                <button onClick={() => { setEditBoxModal(null); setConnResult(null); }} className="text-slate-400 hover:text-white font-bold">&times;</button>
                             </div>
 
                             <form onSubmit={handleEditBoxSubmit} className="space-y-4 text-xs">
@@ -1189,6 +1244,33 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                         className="w-full rounded-xl bg-slate-950 border-slate-800 text-white text-xs"
                                         required
                                     />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block font-semibold text-slate-300 mb-1">Bağlantı Türü / Protokol</label>
+                                        <select
+                                            value={editForm.data.disk_type}
+                                            onChange={(e) => handleDiskTypeChange(e.target.value, true)}
+                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white focus:border-indigo-500 focus:ring-indigo-500 text-xs font-semibold"
+                                        >
+                                            <option value="sftp">🚀 SFTP / SSH (PulsedMedia, Seedbox - Port 22)</option>
+                                            <option value="hetzner_webdav">📦 Hetzner Storage Box (WebDAV - Port 443)</option>
+                                            <option value="webdav">🌐 Özel WebDAV (HTTPS/HTTP)</option>
+                                            <option value="ftp">📁 FTP / FTPS (Port 21)</option>
+                                            <option value="cifs_local">💻 Yerel Mount / CIFS Dizin (Sunucu Yolu)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block font-semibold text-slate-300 mb-1">Port</label>
+                                        <input
+                                            type="number"
+                                            value={editForm.data.port}
+                                            onChange={(e) => editForm.setData('port', e.target.value)}
+                                            className="w-full rounded-xl bg-slate-950 border-slate-800 text-white text-xs font-mono"
+                                            placeholder="22"
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
@@ -1245,26 +1327,49 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                         value={editForm.data.capacity_gb}
                                         onChange={(e) => editForm.setData('capacity_gb', e.target.value)}
                                         className="w-full rounded-xl bg-slate-950 border-slate-800 text-white font-mono focus:border-indigo-500 focus:ring-indigo-500 text-xs"
-                                        placeholder="Örn: 1000 (1 TB için). Boş bırakılırsa diskten otomatik okunur."
+                                        placeholder="Örn: 4000 (4 TB için). Boş bırakılırsa sunucudan otomatik okunur."
                                         min="1"
                                     />
-                                    <p className="text-[11px] text-slate-500 mt-1">
-                                        Hetzner planınızın kapasitesini manuel yazabilirsiniz veya diskin otomatik hesaplanmasına izin verebilirsiniz.
-                                    </p>
                                 </div>
 
-                                <div className="pt-4 border-t border-slate-800 flex gap-2">
+                                {connResult && (
+                                    <div className={`p-3.5 rounded-2xl text-xs flex items-start gap-2.5 border transition-all ${
+                                        connResult.success 
+                                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                                            : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                    }`}>
+                                        <div className="font-bold text-sm leading-none">{connResult.success ? '✅' : '❌'}</div>
+                                        <div className="flex-1 space-y-1">
+                                            <p className="font-semibold">{connResult.message}</p>
+                                            {connResult.details?.total_space && (
+                                                <p className="text-[11px] opacity-80">
+                                                    Toplam Kapasite: <strong>{connResult.details.total_space}</strong> | Boş: <strong>{connResult.details.free_space}</strong> | Kullanılan: <strong>{connResult.details.used_space}</strong>
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="pt-4 border-t border-slate-800 flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={testingConn}
+                                        onClick={() => handleTestConn(editForm.data)}
+                                        className="rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 px-3.5 py-2.5 text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                                    >
+                                        {testingConn ? '⚡ Test Ediliyor...' : '⚡ Bağlantıyı Test Et'}
+                                    </button>
                                     <button
                                         type="submit"
                                         disabled={editForm.processing}
-                                        className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 transition-all disabled:opacity-50"
+                                        className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition-all disabled:opacity-50"
                                     >
                                         Güncelle
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setEditBoxModal(null)}
-                                        className="rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white"
+                                        onClick={() => { setEditBoxModal(null); setConnResult(null); }}
+                                        className="rounded-xl bg-slate-800 px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-white"
                                     >
                                         İptal
                                     </button>

@@ -11,6 +11,7 @@ use App\Models\StorageBox;
 use App\Services\AuditLogService;
 use App\Services\MediaScannerService;
 use App\Services\RemoteTransferService;
+use App\Services\Storage\StorageManager;
 use App\Services\StorageBoxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -27,6 +28,7 @@ class StorageBoxAdminController extends Controller
         protected MediaScannerService $scannerService,
         protected AuditLogService $auditLogService,
         protected RemoteTransferService $remoteTransferService,
+        protected StorageManager $storageManager,
     ) {}
 
     public function index(Request $request): Response
@@ -202,12 +204,30 @@ class StorageBoxAdminController extends Controller
         ]);
     }
 
+    public function testConnection(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'disk_type' => ['required', 'string'],
+            'host' => ['nullable', 'string', 'max:255'],
+            'username' => ['nullable', 'string', 'max:255'],
+            'password' => ['nullable', 'string', 'max:500'],
+            'port' => ['nullable', 'integer'],
+            'mount_path' => ['nullable', 'string', 'max:500'],
+            'share_name' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $driver = $this->storageManager->createDriver($validated['disk_type'], $validated);
+        $result = $driver->testConnection($validated);
+
+        return response()->json($result);
+    }
+
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'mount_path' => ['nullable', 'string', 'max:500'],
-            'disk_type' => ['required', 'string', 'in:cifs,sshfs,local'],
+            'disk_type' => ['required', 'string', 'in:hetzner_webdav,sftp,webdav,ftp,cifs_local,cifs,sshfs,local,pulsedmedia'],
             'host' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:500'],
@@ -246,7 +266,7 @@ class StorageBoxAdminController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'mount_path' => ['nullable', 'string', 'max:500'],
-            'disk_type' => ['required', 'string', 'in:cifs,sshfs,local'],
+            'disk_type' => ['required', 'string', 'in:hetzner_webdav,sftp,webdav,ftp,cifs_local,cifs,sshfs,local,pulsedmedia'],
             'host' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:500'],
@@ -799,12 +819,14 @@ class StorageBoxAdminController extends Controller
         $folder = trim($validated['target_folder'] ?? 'Filmler', '/\\');
         $fileName = trim($validated['file_name']);
 
+        $transferService = app(RemoteTransferService::class);
+
         // Probe size
-        $probe = $this->remoteTransferService->probeUrl($validated['source_url']);
+        $probe = $transferService->probeUrl($validated['source_url']);
         $totalBytes = $probe['file_size'] ?? 0;
 
         try {
-            $storageBox = $this->remoteTransferService->selectStorageBox($validated['storage_box_id'], $totalBytes);
+            $storageBox = $transferService->selectStorageBox($validated['storage_box_id'], $totalBytes);
         } catch (Exception $e) {
             return back()->withErrors(['storage_box_id' => $e->getMessage()]);
         }
@@ -812,7 +834,7 @@ class StorageBoxAdminController extends Controller
         $relativePath = ($folder ? $folder.'/' : '').$fileName;
 
         // Check if identical file with same name and same size already exists on ANY storage box in the system
-        $existingMatch = $this->remoteTransferService->findExistingFileAcrossAllBoxes($fileName, $totalBytes, $folder);
+        $existingMatch = $transferService->findExistingFileAcrossAllBoxes($fileName, $totalBytes, $folder);
 
         if ($existingMatch !== null) {
             $foundBox = $existingMatch['box'];
@@ -836,7 +858,7 @@ class StorageBoxAdminController extends Controller
             ]);
 
             if ($autoAdd) {
-                $this->remoteTransferService->registerMedia($transfer, $foundBox);
+                $transferService->registerMedia($transfer, $foundBox);
             }
 
             $this->auditLogService->log(
@@ -849,7 +871,7 @@ class StorageBoxAdminController extends Controller
             return back()->with('message', sprintf(
                 '"%s" adlı dosya (%s) sistemdeki "%s" depolama alanında aynı boyutta zaten mevcut olduğu için direkt yüklendi olarak işaretlendi.',
                 $fileName,
-                $this->remoteTransferService->formatBytes($totalBytes),
+                $transferService->formatBytes($totalBytes),
                 $foundBox->name
             ));
         }
@@ -868,9 +890,7 @@ class StorageBoxAdminController extends Controller
             'auto_add_media' => $request->boolean('auto_add_media', true),
         ]);
 
-        // Dispatch background worker job and spawn runner if queue slots available
         ProcessRemoteTransferJob::dispatch($transfer);
-        $this->remoteTransferService->processQueue();
 
         $this->auditLogService->log(
             action: 'remote_transfer_started',
@@ -904,15 +924,13 @@ class StorageBoxAdminController extends Controller
         $boxMode = $validated['storage_box_id'];
         $folder = trim($validated['target_folder'] ?? 'Filmler', '/\\');
 
-        $result = $this->remoteTransferService->createBulkTransfers(
+        $transferService = app(RemoteTransferService::class);
+        $result = $transferService->createBulkTransfers(
             rawUrls: $validated['urls'],
             storageBox: in_array($boxMode, ['random', 'auto']) ? 'random' : StorageBox::findOrFail($boxMode),
             targetFolder: $folder,
             autoAddMedia: $request->boolean('auto_add_media', true)
         );
-
-        // Advance queue processes
-        $this->remoteTransferService->processQueue();
 
         if ($result['queued'] === 0) {
             return back()->with('message', 'Geçerli bir URL bulunamadı veya aktarıma uygun link tespit edilemedi.');
