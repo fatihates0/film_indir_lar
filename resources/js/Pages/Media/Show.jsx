@@ -3,33 +3,60 @@ import { Head, Link } from '@inertiajs/react';
 import axios from 'axios';
 import { useState } from 'react';
 
-export default function MediaShow({ item, related = [], quota }) {
-    const [downloading, setDownloading] = useState(false);
+export default function MediaShow({
+    item,
+    isSeries = false,
+    seasonsData = [],
+    versionsData = [],
+    totalVersionsCount = 1,
+    related = [],
+    quota,
+}) {
+    const [selectedSeason, setSelectedSeason] = useState(
+        seasonsData.length > 0 ? seasonsData[0].season_number : 1
+    );
+    const [downloadingId, setDownloadingId] = useState(null);
     const [downloadModal, setDownloadModal] = useState(null);
+    const [mediaInfoModal, setMediaInfoModal] = useState(null);
     const [errorMessage, setErrorMessage] = useState(null);
     const [copied, setCopied] = useState(false);
-    const [showPlayer, setShowPlayer] = useState(false);
 
-    const sizeGb = item?.file_size ? (item.file_size / 1073741824).toFixed(2) : '0.00';
+    const genresList = Array.isArray(item.genres)
+        ? item.genres
+        : typeof item.genres === 'string'
+        ? item.genres.split(',')
+        : [];
 
-    const handleDownload = async () => {
-        setDownloading(true);
+    const handleDownloadSingle = async (targetItem) => {
+        const targetId = targetItem?.id || item.id;
+        setDownloadingId(targetId);
         setErrorMessage(null);
 
         try {
-            const res = await axios.post(route('media.authorize-download', item.id));
+            const res = await axios.post(route('media.authorize-download', targetId));
             if (res.data.success) {
+                const targetSizeGb = targetItem?.size_gb
+                    ? targetItem.size_gb
+                    : targetItem?.file_size
+                    ? (targetItem.file_size / 1073741824).toFixed(2)
+                    : item.file_size
+                    ? (item.file_size / 1073741824).toFixed(2)
+                    : '0.00';
+
                 setDownloadModal({
+                    itemTitle: targetItem?.title || item.title,
+                    fileName: targetItem?.file_name || item.file_name,
                     download_url: res.data.download_url,
                     expires_at: res.data.expires_at,
-                    size_gb: sizeGb,
+                    size_gb: targetSizeGb,
+                    quality: targetItem?.quality_label || item.quality_label || '4K UHD',
                 });
             }
         } catch (err) {
             const msg = err.response?.data?.message || 'İndirme yetkilendirmesi başarısız oldu.';
             setErrorMessage(msg);
         } finally {
-            setDownloading(false);
+            setDownloadingId(null);
         }
     };
 
@@ -39,12 +66,18 @@ export default function MediaShow({ item, related = [], quota }) {
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const currentSeasonObj = seasonsData.find((s) => s.season_number === selectedSeason) || seasonsData[0];
+
+    const highestVersion = (!isSeries && versionsData.length > 0)
+        ? versionsData[versionsData.length - 1]
+        : item;
+
     return (
         <AuthenticatedLayout>
             <Head title={`${item.title} - CINEBOX`} />
 
-            <div className="-mt-8 space-y-12 pb-12">
-                {/* Backdrop Hero Banner */}
+            <div className="-mt-8 space-y-12 pb-16">
+                {/* Hero Banner Section */}
                 <div className="relative w-full min-h-[480px] md:min-h-[560px] bg-slate-950 overflow-hidden flex items-end">
                     {item.backdrop_url ? (
                         <img
@@ -56,11 +89,11 @@ export default function MediaShow({ item, related = [], quota }) {
                         <div className="absolute inset-0 bg-hero-gradient" />
                     )}
 
-                    {/* Gradient Overlay Shadows */}
+                    {/* Gradient Overlays */}
                     <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/70 to-transparent" />
                     <div className="absolute inset-0 bg-gradient-to-r from-[#08090d] via-[#08090d]/60 to-transparent" />
 
-                    {/* Hero Content Grid */}
+                    {/* Hero Grid Content */}
                     <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-10 pt-28 w-full">
                         <div className="flex flex-col md:flex-row gap-8 items-start">
                             {/* Poster Card */}
@@ -74,18 +107,18 @@ export default function MediaShow({ item, related = [], quota }) {
                                     </div>
                                 )}
 
-                                {sizeGb && (
-                                    <div className="absolute bottom-3 left-3 right-3 px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md border border-white/10 text-center font-mono font-bold text-xs text-indigo-300">
-                                        {sizeGb} GB
-                                    </div>
-                                )}
+                                <div className="absolute bottom-3 left-3 right-3 px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md border border-white/10 text-center font-mono font-bold text-xs text-indigo-300">
+                                    {isSeries
+                                        ? `${seasonsData.length} Sezon • ${seasonsData.reduce((acc, s) => acc + s.episodes.length, 0)} Bölüm`
+                                        : `${totalVersionsCount} Sürüm Seçeneği`}
+                                </div>
                             </div>
 
-                            {/* Details & Specs */}
+                            {/* Details Info */}
                             <div className="flex-1 space-y-5 text-slate-100 text-left">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <span className="px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider gradient-button text-white shadow-md">
-                                        {item.type === 'movie' ? 'Film' : 'Dizi'}
+                                    <span className={`px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${isSeries ? 'gradient-button text-white shadow-md' : 'bg-emerald-600 text-white'}`}>
+                                        {isSeries ? 'Dizi' : 'Film'}
                                     </span>
                                     {item.year && (
                                         <span className="px-3.5 py-1 rounded-full text-xs font-semibold glass-panel text-slate-300 border border-white/10">
@@ -98,7 +131,7 @@ export default function MediaShow({ item, related = [], quota }) {
                                         </span>
                                     )}
                                     <span className="px-3.5 py-1 rounded-full text-xs font-bold gradient-badge-4k uppercase">
-                                        4K Ultra HD
+                                        {highestVersion.quality_label || '4K Ultra HD'}
                                     </span>
                                     <span className="px-3.5 py-1 rounded-full text-xs font-bold bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 uppercase">
                                         TR - EN Dual Ses
@@ -116,9 +149,9 @@ export default function MediaShow({ item, related = [], quota }) {
                                     )}
                                 </div>
 
-                                {item.genres && (
+                                {genresList.length > 0 && (
                                     <div className="flex flex-wrap gap-2">
-                                        {item.genres.split(',').map((g, idx) => (
+                                        {genresList.map((g, idx) => (
                                             <span key={idx} className="px-3 py-1 rounded-xl text-xs font-medium bg-slate-900/80 border border-white/10 text-slate-300">
                                                 {g.trim()}
                                             </span>
@@ -132,29 +165,29 @@ export default function MediaShow({ item, related = [], quota }) {
                                     </p>
                                 )}
 
-                                {/* Main Action Buttons */}
-                                <div className="flex flex-wrap items-center gap-4 pt-2">
-                                    <button
-                                        onClick={handleDownload}
-                                        disabled={downloading}
-                                        className="px-8 py-4 rounded-2xl gradient-button text-white font-bold text-sm shadow-glow-purple hover:scale-105 transition-all flex items-center gap-3"
-                                    >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                        </svg>
-                                        {downloading ? 'Yetkilendiriliyor...' : 'Yüksek Hızlı İndir (IDM)'}
-                                    </button>
+                                {/* Main Download Action Button */}
+                                {!isSeries && (
+                                    <div className="flex flex-wrap items-center gap-4 pt-2">
+                                        <button
+                                            onClick={() => handleDownloadSingle(highestVersion)}
+                                            disabled={downloadingId === highestVersion.id}
+                                            className="px-8 py-4 rounded-2xl gradient-button text-white font-bold text-sm shadow-glow-purple hover:scale-105 transition-all flex items-center gap-3"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                            {downloadingId === highestVersion.id ? 'Yetkilendiriliyor...' : `En Yüksek Kalite İndir (${highestVersion.quality_label || 'IDM'})`}
+                                        </button>
 
-                                    <button
-                                        onClick={() => setShowPlayer(!showPlayer)}
-                                        className="px-7 py-4 rounded-2xl glass-panel text-white font-bold text-sm hover:border-white/30 transition-all flex items-center gap-2"
-                                    >
-                                        <svg className="w-5 h-5 text-indigo-400 fill-current" viewBox="0 0 24 24">
-                                            <path d="M8 5v14l11-7z" />
-                                        </svg>
-                                        {showPlayer ? 'Oynatıcıyı Gizle' : 'Anında Önizleme Oynat'}
-                                    </button>
-                                </div>
+                                        <button
+                                            onClick={() => setMediaInfoModal(highestVersion)}
+                                            className="px-7 py-4 rounded-2xl glass-panel text-white font-bold text-sm hover:border-white/30 transition-all flex items-center gap-2"
+                                        >
+                                            <span className="text-indigo-400 text-base">📋</span>
+                                            Media Info
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -170,53 +203,161 @@ export default function MediaShow({ item, related = [], quota }) {
                     </div>
                 )}
 
-                {/* Embedded Video Player Modal/Container */}
-                {showPlayer && downloadModal?.download_url && (
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-fade-in">
-                        <div className="rounded-3xl glass-panel border border-white/10 p-4 shadow-2xl overflow-hidden space-y-3">
-                            <div className="flex items-center justify-between px-2">
-                                <h3 className="font-display font-bold text-base text-white flex items-center gap-2">
-                                    <span>🎥 Canlı Medya Akış Oynatıcısı</span>
-                                </h3>
-                                <button onClick={() => setShowPlayer(false)} className="text-xs text-slate-400 hover:text-white">✕ Kapat</button>
+                {/* ============================================================== */}
+                {/* DİZİLER İÇİN SEZON & BÖLÜM GRUPLAMA LISTESİ */}
+                {/* ============================================================== */}
+                {isSeries && seasonsData.length > 0 && (
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 text-left">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                            <div>
+                                <h2 className="font-display font-bold text-2xl text-white flex items-center gap-3">
+                                    <span>📺 Sezonlar & Bölümler</span>
+                                    <span className="text-xs font-semibold px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                        {seasonsData.length} Sezon Arşivde
+                                    </span>
+                                </h2>
+                                <p className="text-xs text-slate-400 mt-1">İndirmek veya detaylarını incelemek istediğiniz bölümü seçin.</p>
                             </div>
-                            <div className="aspect-video w-full rounded-2xl bg-black overflow-hidden shadow-inner">
-                                <video
-                                    controls
-                                    autoPlay
-                                    src={downloadModal.download_url}
-                                    className="w-full h-full"
-                                >
-                                    Tarayıcınız HTML5 video oynatımını desteklememektedir.
-                                </video>
+
+                            {/* Season Tabs */}
+                            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                                {seasonsData.map((s) => (
+                                    <button
+                                        key={s.season_number}
+                                        onClick={() => setSelectedSeason(s.season_number)}
+                                        className={`px-5 py-2.5 rounded-2xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2 ${
+                                            selectedSeason === s.season_number
+                                                ? 'gradient-button text-white shadow-glow-purple scale-105'
+                                                : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
+                                        }`}
+                                    >
+                                        <span>{s.title}</span>
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 text-slate-300">
+                                            {s.episodes.length} Bölüm
+                                        </span>
+                                    </button>
+                                ))}
                             </div>
                         </div>
+
+                        {/* Episodes List for Selected Season (Stacked Rows) */}
+                        {currentSeasonObj && (
+                            <div className="grid gap-4">
+                                {currentSeasonObj.episodes.map((ep) => (
+                                    <div
+                                        key={ep.id}
+                                        className="rounded-2xl glass-card border border-white/10 p-5 hover:border-indigo-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-950/40"
+                                    >
+                                        <div className="space-y-2 text-left">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="px-3 py-1 rounded-xl text-xs font-black bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md">
+                                                    Bölüm {ep.episode_number || ep.id}
+                                                </span>
+                                                <span className="px-2.5 py-0.5 rounded-lg bg-black/60 text-indigo-300 font-mono text-xs border border-white/10 font-bold">
+                                                    {ep.quality_label}
+                                                </span>
+                                                <span className="px-2.5 py-0.5 rounded-lg bg-black/60 text-slate-300 font-mono text-xs border border-white/10">
+                                                    {ep.size_gb} GB
+                                                </span>
+                                                <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
+                                                    TR - EN Dual Ses
+                                                </span>
+                                            </div>
+                                            <div className="font-mono text-xs text-slate-300 font-semibold truncate max-w-2xl">
+                                                {ep.file_name}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 shrink-0">
+                                            <button
+                                                onClick={() => setMediaInfoModal(ep)}
+                                                className="px-4 py-2.5 rounded-xl glass-panel text-slate-200 text-xs font-bold hover:text-white transition-all flex items-center gap-2"
+                                            >
+                                                <span className="text-indigo-400 text-sm">📋</span>
+                                                Media Info
+                                            </button>
+
+                                            <button
+                                                onClick={() => handleDownloadSingle(ep)}
+                                                disabled={downloadingId === ep.id}
+                                                className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple hover:scale-105 transition-transform flex items-center gap-2"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                </svg>
+                                                {downloadingId === ep.id ? 'Yetkilendiriliyor...' : 'İndir'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {/* File Technical Details Grid */}
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid md:grid-cols-3 gap-6">
-                    <div className="glass-card rounded-3xl p-6 border border-white/5 text-left space-y-3">
-                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Dosya Kalitesi</div>
-                        <div className="font-display font-black text-2xl text-white">4K UHD Remux</div>
-                        <p className="text-xs text-slate-400">Hetzner Storage Box üzerinde doğrudan yüksek veri hızıyla saklanmaktadır.</p>
-                    </div>
-
-                    <div className="glass-card rounded-3xl p-6 border border-white/5 text-left space-y-3">
-                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Ses Dilleri</div>
-                        <div className="font-display font-bold text-lg text-white flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-xs">TR Türkçe Dublaj</span>
-                            <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 text-xs">EN Orijinal Ses</span>
+                {/* ============================================================== */}
+                {/* FILMLER İÇİN KALİTE & SÜRÜM SEÇENEKLERİ (4K, REMUX, 1080p, 720p) */}
+                {/* ============================================================== */}
+                {!isSeries && versionsData.length > 0 && (
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 text-left">
+                        <div>
+                            <h2 className="font-display font-bold text-2xl text-white flex items-center gap-3">
+                                <span>🎞️ Kalite & Sürüm Seçenekleri</span>
+                                <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                    {versionsData.length} Sürüm / Kalite Mevcut
+                                </span>
+                            </h2>
+                            <p className="text-xs text-slate-400 mt-1">İndirmek veya teknik detaylarını incelemek istediğiniz versiyonu aşağıdan seçebilirsiniz.</p>
                         </div>
-                        <p className="text-xs text-slate-400">Çoklu ses kanalı ve Türkçe altyazı akışı entegredir.</p>
-                    </div>
 
-                    <div className="glass-card rounded-3xl p-6 border border-white/5 text-left space-y-3">
-                        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Kota Durumu</div>
-                        <div className="font-display font-black text-2xl text-emerald-400">{sizeGb} GB</div>
-                        <p className="text-xs text-slate-400">Bu içeriği indirdiğinizde 30 günlük dönemsel kotanızdan düşülecektir.</p>
+                        <div className="grid gap-4">
+                            {versionsData.map((ver) => (
+                                <div
+                                    key={ver.id}
+                                    className="rounded-2xl glass-card border border-white/10 p-5 hover:border-indigo-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-950/40"
+                                >
+                                    <div className="space-y-2 text-left">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="px-3 py-1 rounded-xl text-xs font-black bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md">
+                                                {ver.quality_label}
+                                            </span>
+                                            <span className="px-2.5 py-0.5 rounded-lg bg-black/60 text-slate-300 font-mono text-xs border border-white/10">
+                                                {ver.size_gb} GB
+                                            </span>
+                                            <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
+                                                TR - EN Dual Ses
+                                            </span>
+                                        </div>
+                                        <div className="font-mono text-xs text-slate-300 font-semibold truncate max-w-2xl">
+                                            {ver.file_name}
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3 shrink-0">
+                                        <button
+                                            onClick={() => setMediaInfoModal(ver)}
+                                            className="px-4 py-2.5 rounded-xl glass-panel text-slate-200 text-xs font-bold hover:text-white transition-all flex items-center gap-2"
+                                        >
+                                            <span className="text-indigo-400 text-sm">📋</span>
+                                            Media Info
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleDownloadSingle(ver)}
+                                            disabled={downloadingId === ver.id}
+                                            className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple hover:scale-105 transition-transform flex items-center gap-2"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                            {downloadingId === ver.id ? 'Yetkilendiriliyor...' : 'İndir'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* Related Media Section */}
                 {related && related.length > 0 && (
@@ -246,7 +387,7 @@ export default function MediaShow({ item, related = [], quota }) {
                     </div>
                 )}
 
-                {/* Download Authorization Modal */}
+                {/* Download Modal */}
                 {downloadModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
                         <div className="w-full max-w-lg glass-panel rounded-3xl border border-white/15 p-6 shadow-2xl space-y-6 text-left relative">
@@ -256,8 +397,8 @@ export default function MediaShow({ item, related = [], quota }) {
                                         ✓
                                     </div>
                                     <div>
-                                        <h3 className="font-display font-bold text-lg text-white">Bağlantı Oluşturuldu!</h3>
-                                        <p className="text-xs text-slate-400">IDM ile doğrudan indirmeye başlayabilirsiniz.</p>
+                                        <h3 className="font-display font-bold text-lg text-white">İndirme Bağlantısı Hazır!</h3>
+                                        <p className="text-xs text-slate-400">IDM veya tarayıcınızla doğrudan indirebilirsiniz.</p>
                                     </div>
                                 </div>
                                 <button
@@ -270,14 +411,15 @@ export default function MediaShow({ item, related = [], quota }) {
 
                             <div className="p-4 rounded-2xl bg-slate-950/80 border border-white/5 space-y-2">
                                 <div className="flex items-center justify-between text-xs">
-                                    <span className="font-bold text-white truncate max-w-xs">{item.title}</span>
+                                    <span className="font-bold text-white truncate max-w-xs">{downloadModal.itemTitle}</span>
                                     <span className="font-mono font-bold text-indigo-300">{downloadModal.size_gb} GB</span>
                                 </div>
+                                <div className="text-[11px] font-mono text-slate-400 truncate">{downloadModal.fileName}</div>
                             </div>
 
                             <div className="space-y-2">
                                 <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                                    İndirme Bağlantısı
+                                    Doğrudan Bağlantı URL (IDM için Kopyalayın)
                                 </label>
                                 <div className="flex items-center gap-2">
                                     <input
@@ -308,8 +450,108 @@ export default function MediaShow({ item, related = [], quota }) {
                                     rel="noreferrer"
                                     className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple"
                                 >
-                                    Doğrudan İndir
+                                    Hemen İndir
                                 </a>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Media Info Technical Details Popup Modal */}
+                {mediaInfoModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+                        <div className="w-full max-w-2xl glass-panel rounded-3xl border border-white/15 p-6 shadow-2xl space-y-6 text-left relative max-h-[90vh] overflow-y-auto">
+                            <div className="flex items-start justify-between border-b border-white/10 pb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 text-xl font-bold">
+                                        📋
+                                    </div>
+                                    <div>
+                                        <h3 className="font-display font-bold text-lg text-white">Media Info Detayları</h3>
+                                        <p className="text-xs text-slate-400 font-mono truncate max-w-md">{mediaInfoModal.file_name}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setMediaInfoModal(null)}
+                                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            {/* Metadata Grid */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-white/5 space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Çözünürlük & Kalite</div>
+                                    <div className="text-sm font-bold text-white">
+                                        {mediaInfoModal.width && mediaInfoModal.height
+                                            ? `${mediaInfoModal.width} x ${mediaInfoModal.height} (${mediaInfoModal.quality_label})`
+                                            : mediaInfoModal.quality_label || '4K Ultra HD'}
+                                    </div>
+                                </div>
+
+                                <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-white/5 space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Dosya Boyutu</div>
+                                    <div className="text-sm font-bold text-indigo-300 font-mono">
+                                        {mediaInfoModal.size_gb ? `${mediaInfoModal.size_gb} GB` : 'Bilinmiyor'}
+                                    </div>
+                                </div>
+
+                                <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-white/5 space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Video Kodlayıcı & FPS</div>
+                                    <div className="text-sm font-bold text-white">
+                                        {mediaInfoModal.video_codec || 'HEVC / H.265'} {mediaInfoModal.fps ? `(${mediaInfoModal.fps} fps)` : ''}
+                                    </div>
+                                </div>
+
+                                <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-white/5 space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ses Kodlayıcı & Kanal</div>
+                                    <div className="text-sm font-bold text-white">
+                                        {mediaInfoModal.audio_codec || 'AAC / DTS-HD'} {mediaInfoModal.audio_channels ? `(${mediaInfoModal.audio_channels} Kanal)` : ''}
+                                    </div>
+                                </div>
+
+                                <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-white/5 space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ses & Altyazı Dilleri</div>
+                                    <div className="text-xs font-semibold text-slate-200">
+                                        {mediaInfoModal.audio_language || 'TR (Türkçe Dublaj) - EN (Orijinal Ses)'}
+                                    </div>
+                                </div>
+
+                                <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-white/5 space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Bitrate (Veri Hızı)</div>
+                                    <div className="text-sm font-bold text-emerald-400 font-mono">
+                                        {mediaInfoModal.bitrate ? `${(mediaInfoModal.bitrate / 1000).toFixed(0)} kbps` : 'Yüksek Bitrate'}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* File Path Information */}
+                            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-white/5 space-y-1">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Göreli Dosya Yolu</div>
+                                <div className="font-mono text-xs text-indigo-300 break-all select-all">
+                                    {mediaInfoModal.file_path || mediaInfoModal.file_name}
+                                </div>
+                            </div>
+
+                            {/* Footer Actions */}
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                                <button
+                                    onClick={() => setMediaInfoModal(null)}
+                                    className="px-5 py-2.5 rounded-xl glass-panel text-slate-300 text-xs font-bold hover:text-white"
+                                >
+                                    Kapat
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        const target = mediaInfoModal;
+                                        setMediaInfoModal(null);
+                                        handleDownloadSingle(target);
+                                    }}
+                                    className="px-6 py-2.5 rounded-xl gradient-button text-white text-xs font-bold shadow-glow-purple"
+                                >
+                                    İndirme Bağlantısı Al
+                                </button>
                             </div>
                         </div>
                     </div>

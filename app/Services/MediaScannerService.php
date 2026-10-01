@@ -32,7 +32,7 @@ class MediaScannerService
 
         // 1. Dizin taraması ile olası mount klasörlerini bul
         foreach ($searchPaths as $basePath) {
-            if (file_exists($basePath) && is_dir($basePath)) {
+            if ($this->safeFileExists($basePath) && $this->safeIsDir($basePath)) {
                 if ($basePath !== '/mnt') {
                     $candidatePaths[] = str_replace('\\', '/', $basePath);
                 }
@@ -43,8 +43,8 @@ class MediaScannerService
                         if ($item === '.' || $item === '..') {
                             continue;
                         }
-                        $full = str_replace('\\', '/', rtrim($basePath, '/') . '/' . $item);
-                        if (is_dir($full) && (Str::contains($item, ['storage', 'box', 'film', 'dizi'], true) || Str::startsWith($basePath, '/mnt/storageboxes'))) {
+                        $full = str_replace('\\', '/', rtrim($basePath, '/').'/'.$item);
+                        if ($this->safeIsDir($full) && (Str::contains($item, ['storage', 'box', 'film', 'dizi'], true) || Str::startsWith($basePath, '/mnt/storageboxes'))) {
                             $candidatePaths[] = $full;
                         }
                     }
@@ -53,9 +53,9 @@ class MediaScannerService
         }
 
         // 2. /etc/fstab dosyasındaki CIFS mount kayıtlarını ayrıştır
-        if (file_exists('/etc/fstab') && is_readable('/etc/fstab')) {
-            $fstabContent = file_get_contents('/etc/fstab');
-            $lines = explode("\n", $fstabContent);
+        if ($this->safeFileExists('/etc/fstab') && $this->safeIsReadable('/etc/fstab')) {
+            $fstabContent = @file_get_contents('/etc/fstab');
+            $lines = explode("\n", (string) $fstabContent);
             foreach ($lines as $line) {
                 $line = trim($line);
                 if (empty($line) || Str::startsWith($line, '#')) {
@@ -73,7 +73,7 @@ class MediaScannerService
         $candidatePaths = array_unique($candidatePaths);
 
         foreach ($candidatePaths as $path) {
-            if (! file_exists($path) || ! is_readable($path)) {
+            if (! $this->safeFileExists($path) || ! $this->safeIsReadable($path)) {
                 continue;
             }
 
@@ -86,15 +86,15 @@ class MediaScannerService
                 ->orWhere('mount_path', str_replace('/', '\\', $path))
                 ->first();
 
-            $isOnline = file_exists($path) && is_readable($path);
+            $isOnline = $this->safeFileExists($path) && $this->safeIsReadable($path);
 
             if (! $box) {
-                $displayName = 'Storage Box (' . ucfirst($folderName) . ')';
+                $displayName = 'Storage Box ('.ucfirst($folderName).')';
                 $slug = Str::slug($displayName);
 
                 $counter = 1;
                 while (StorageBox::where('slug', $slug)->exists()) {
-                    $slug = Str::slug($displayName) . '-' . $counter++;
+                    $slug = Str::slug($displayName).'-'.$counter++;
                 }
 
                 $box = StorageBox::create([
@@ -169,7 +169,7 @@ class MediaScannerService
         $mountPath = $storageBox ? $storageBox->mount_path : config('storagebox.mount_path', storage_path('app/storagebox'));
 
         // Yerel Mount Klasörü Mevcut Değilse ancak WebDAV/HTTP Bilgisi Varsa Uzaktan Tara
-        if (! file_exists($mountPath) || ! is_readable($mountPath)) {
+        if (! $this->safeFileExists($mountPath) || ! $this->safeIsReadable($mountPath)) {
             if ($storageBox && ! empty($storageBox->host) && ! empty($storageBox->username) && ! empty($storageBox->password)) {
                 $storageBox->update(['status' => 'online']);
                 $remoteRes = $this->scanRemoteWebdav($storageBox, $subDirectory);
@@ -295,9 +295,9 @@ class MediaScannerService
                     }
 
                     if (! $existing) {
-                        $cleanTitle = preg_replace('/(1080p|720p|2160p|4k|bluray|web-dl|x264|x265|hevc|remux|aac|dts)/i', '', $title);
-                        $cleanTitle = trim(preg_replace('/[\.\_\-]/', ' ', $cleanTitle));
-                        $displayTitle = ! empty($cleanTitle) ? $cleanTitle : $title;
+                        $cleanInfo = $this->tmdbService->cleanTitle($fileName);
+                        $displayTitle = $cleanInfo['title'] ?: $title;
+                        $year = $year ?: $cleanInfo['year'];
 
                         $slug = Media::generateUniqueSlug($displayTitle, $year);
 
@@ -305,7 +305,7 @@ class MediaScannerService
                         try {
                             $meta = $this->storageBoxService->probeMetadata($relativePath, $storageBox);
                         } catch (Exception $e) {
-                            Log::info("Metadata probe skipped for {$relativePath}: " . $e->getMessage());
+                            Log::info("Metadata probe skipped for {$relativePath}: ".$e->getMessage());
                         }
 
                         $newMedia = Media::create([
@@ -332,8 +332,8 @@ class MediaScannerService
                         // TMDB metadata otomatik çekme
                         try {
                             $this->tmdbService->fetchAndApply($newMedia);
-                        } catch (\Exception $e) {
-                            Log::info("TMDB auto-fetch failed for {$newMedia->title}: " . $e->getMessage());
+                        } catch (Exception $e) {
+                            Log::info("TMDB auto-fetch failed for {$newMedia->title}: ".$e->getMessage());
                         }
 
                         $added++;
@@ -350,7 +350,8 @@ class MediaScannerService
                     }
                 }
             } catch (\Throwable $e) {
-                Log::warning('Media scan error for file: ' . $e->getMessage());
+                Log::warning('Media scan error for file: '.$e->getMessage());
+
                 continue;
             }
         }
@@ -397,11 +398,11 @@ class MediaScannerService
             $cleanPath = implode('/', array_map('rawurlencode', array_filter($pathSegments, fn ($s) => $s !== '')));
 
             if (! str_starts_with($host, 'http://') && ! str_starts_with($host, 'https://')) {
-                $url = "https://{$host}/" . ($cleanPath ? $cleanPath . '/' : '');
+                $url = "https://{$host}/".($cleanPath ? $cleanPath.'/' : '');
             } else {
-                $url = rtrim($host, '/') . '/' . ($cleanPath ? $cleanPath . '/' : '');
+                $url = rtrim($host, '/').'/'.($cleanPath ? $cleanPath.'/' : '');
             }
-            $url = rtrim($url, '/') . '/';
+            $url = rtrim($url, '/').'/';
 
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
@@ -489,9 +490,9 @@ class MediaScannerService
                             ->first();
 
                         if (! $existing) {
-                            $cleanTitle = preg_replace('/(1080p|720p|2160p|4k|bluray|web-dl|x264|x265|hevc|remux|aac|dts)/i', '', $title);
-                            $cleanTitle = trim(preg_replace('/[\.\_\-]/', ' ', $cleanTitle));
-                            $displayTitle = ! empty($cleanTitle) ? $cleanTitle : $title;
+                            $cleanInfo = $this->tmdbService->cleanTitle($name);
+                            $displayTitle = $cleanInfo['title'] ?: $title;
+                            $year = $year ?: $cleanInfo['year'];
 
                             $slug = Media::generateUniqueSlug($displayTitle, $year);
 
@@ -512,7 +513,7 @@ class MediaScannerService
 
                             try {
                                 $this->tmdbService->fetchAndApply($newMedia);
-                            } catch (\Exception $e) {
+                            } catch (Exception $e) {
                                 // fallback
                             }
 
@@ -536,5 +537,64 @@ class MediaScannerService
             'updated' => $updated,
             'scanned_paths' => $scannedPaths,
         ];
+    }
+
+    protected function isPathAllowedByOpenBasedir(string $path): bool
+    {
+        $openBasedir = ini_get('open_basedir');
+        if (! $openBasedir) {
+            return true;
+        }
+
+        $allowedPaths = explode(PATH_SEPARATOR, $openBasedir);
+        $normalizedPath = str_replace('\\', '/', $path);
+
+        foreach ($allowedPaths as $allowed) {
+            $allowed = str_replace('\\', '/', rtrim($allowed, '/'));
+            if ($allowed !== '' && (str_starts_with($normalizedPath, $allowed) || $normalizedPath === $allowed)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function safeFileExists(?string $path): bool
+    {
+        if (! $path || ! $this->isPathAllowedByOpenBasedir($path)) {
+            return false;
+        }
+
+        try {
+            return @file_exists($path);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    protected function safeIsDir(?string $path): bool
+    {
+        if (! $path || ! $this->isPathAllowedByOpenBasedir($path)) {
+            return false;
+        }
+
+        try {
+            return @is_dir($path);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    protected function safeIsReadable(?string $path): bool
+    {
+        if (! $path || ! $this->isPathAllowedByOpenBasedir($path)) {
+            return false;
+        }
+
+        try {
+            return @is_readable($path);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }

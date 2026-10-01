@@ -1,9 +1,23 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, router, usePage } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 
 export default function MediaAdminIndex({ media, storageBoxes = [], filters = {} }) {
     const flash = usePage().props.flash;
+
+    const [searchQuery, setSearchQuery] = useState(filters.search || '');
+    const [perPage, setPerPage] = useState(filters.per_page || '15');
+
+    const handleSearchSubmit = (e) => {
+        e.preventDefault();
+        router.get(route('admin.media.index'), { search: searchQuery, per_page: perPage }, { preserveState: true, replace: true });
+    };
+
+    const handlePerPageChange = (e) => {
+        const val = e.target.value;
+        setPerPage(val);
+        router.get(route('admin.media.index'), { search: searchQuery, per_page: val }, { preserveState: true, replace: true });
+    };
 
     // Modal & Picker state
     const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -238,9 +252,43 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
 
                 {/* Media Management Table */}
                 <div className="rounded-3xl bg-[#0f1422] border border-slate-800 overflow-hidden shadow-2xl">
-                    <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-                        <h3 className="text-base font-bold text-white">Kütüphanedeki Tüm Medyalar</h3>
-                        <span className="text-xs font-semibold text-slate-400">Toplam {media.total || media.data.length} İçerik</span>
+                    <div className="p-6 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                            <h3 className="text-base font-bold text-white">Kütüphanedeki Tüm Medyalar</h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                {media.from && media.to
+                                    ? `${media.from} - ${media.to} arası gösteriliyor (${media.total} toplam içerik)`
+                                    : `Toplam ${media.total || media.data.length} İçerik`}
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="İçerik veya dosya adı ara..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-48 md:w-64"
+                                />
+                                <button type="submit" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl text-xs font-semibold">
+                                    Ara
+                                </button>
+                            </form>
+                            <div className="flex items-center gap-2 text-xs text-slate-400">
+                                <span>Göster:</span>
+                                <select
+                                    value={perPage}
+                                    onChange={handlePerPageChange}
+                                    className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                >
+                                    <option value="15">15 / sayfa</option>
+                                    <option value="30">30 / sayfa</option>
+                                    <option value="50">50 / sayfa</option>
+                                    <option value="100">100 / sayfa</option>
+                                    <option value="all">Tümü ({media.total || media.data.length})</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="overflow-x-auto">
@@ -336,6 +384,32 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                             </tbody>
                         </table>
                     </div>
+
+                    {/* Pagination Links */}
+                    {media.links && media.links.length > 3 && (
+                        <div className="p-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-950/40 text-xs text-slate-400">
+                            <div>
+                                Sayfa <span className="font-bold text-white">{media.current_page}</span> / <span className="font-bold text-white">{media.last_page}</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                {media.links.map((link, idx) => (
+                                    <Link
+                                        key={idx}
+                                        href={link.url || '#'}
+                                        preserveScroll
+                                        dangerouslySetInnerHTML={{ __html: link.label }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                            link.active
+                                                ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/30'
+                                                : link.url
+                                                ? 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                                                : 'bg-slate-900/50 text-slate-600 cursor-not-allowed pointer-events-none'
+                                        }`}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 

@@ -31,11 +31,23 @@ class MediaAdminController extends Controller
         $query = Media::with('storageBox')->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
-            $query->where('title', 'like', '%' . $request->search . '%')
-                  ->orWhere('original_title', 'like', '%' . $request->search . '%');
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', '%'.$search.'%')
+                    ->orWhere('original_title', 'like', '%'.$search.'%')
+                    ->orWhere('file_name', 'like', '%'.$search.'%');
+            });
         }
 
-        $media = $query->paginate(15)->withQueryString();
+        $perPage = $request->input('per_page', 15);
+        if ($perPage === 'all') {
+            $count = (clone $query)->count();
+            $perPage = $count > 0 ? $count : 15;
+        } else {
+            $perPage = max(1, (int) $perPage);
+        }
+
+        $media = $query->paginate($perPage)->withQueryString();
 
         $storageBoxes = StorageBox::where('is_active', true)
             ->get()
@@ -59,7 +71,7 @@ class MediaAdminController extends Controller
         return Inertia::render('Admin/Media/Index', [
             'media' => $media,
             'storageBoxes' => $storageBoxes,
-            'filters' => $request->only(['search']),
+            'filters' => $request->only(['search', 'per_page']),
         ]);
     }
 
@@ -227,16 +239,23 @@ class MediaAdminController extends Controller
 
     public function syncAllTmdb(): RedirectResponse
     {
-        $allMedia = Media::whereNull('tmdb_id')->orWhereNull('overview')->get();
+        $allMedia = Media::all();
         $count = 0;
+        $failed = 0;
 
         foreach ($allMedia as $media) {
             if ($this->tmdbService->fetchAndApply($media)) {
                 $count++;
+            } else {
+                $failed++;
             }
         }
 
-        return back()->with('message', sprintf('%d medya için TMDB bilgileri başarıyla çekildi.', $count));
+        if ($count === 0 && $failed > 0) {
+            return back()->with('error', 'TMDB bilgileri çekilemedi. Lütfen geçerli bir TMDB API Anahtarı (TMDB_API_KEY) tanımlandığından emin olun.');
+        }
+
+        return back()->with('message', sprintf('%d medya için TMDB bilgileri başarıyla çekildi (%d medya eşleşmedi).', $count, $failed));
     }
 
     public function destroy(Media $media): RedirectResponse

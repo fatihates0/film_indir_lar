@@ -281,8 +281,11 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                 {mediaList.length > 0 ? (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
                         {mediaList.map((item) => {
-                            const sizeGb = item.file_size ? (item.file_size / 1073741824).toFixed(1) : null;
-                            const isMovie = item.type === 'movie';
+                            const groupInfo = item.group_info || {};
+                            const isSeries = groupInfo.is_series ?? (item.type === 'episode' || item.type === 'series');
+                            const versionsCount = groupInfo.versions_count || 1;
+                            const totalSizeGb = groupInfo.total_size_bytes ? (groupInfo.total_size_bytes / 1073741824).toFixed(1) : (item.file_size ? (item.file_size / 1073741824).toFixed(1) : null);
+                            const rating = item.vote_average || item.tmdb_rating;
 
                             return (
                                 <div
@@ -301,20 +304,26 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                                         {/* Overlay Shadow */}
                                         <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-transparent to-transparent opacity-80 group-hover:opacity-60 transition-opacity" />
 
-                                        {/* Quality & Rating Tags */}
+                                        {/* Type Tag & Rating / Group Info Badge */}
                                         <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-1 z-10">
-                                            <span className="px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider bg-black/70 backdrop-blur-md text-white border border-white/10">
-                                                {isMovie ? 'Film' : 'Dizi'}
+                                            <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider bg-black/75 backdrop-blur-md border border-white/10 ${isSeries ? 'text-indigo-400 border-indigo-500/30' : 'text-emerald-400 border-emerald-500/30'}`}>
+                                                {isSeries ? 'Dizi' : 'Film'}
                                             </span>
 
-                                            {item.tmdb_rating > 0 && (
-                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/70 backdrop-blur-md text-amber-400 border border-white/10 flex items-center gap-1">
-                                                    ★ {item.tmdb_rating}
+                                            {rating > 0 ? (
+                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/75 backdrop-blur-md text-amber-400 border border-white/10 flex items-center gap-1">
+                                                    ★ {rating.toFixed ? rating.toFixed(1) : rating}
                                                 </span>
+                                            ) : (
+                                                versionsCount > 1 && (
+                                                    <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-indigo-600/80 text-white backdrop-blur-md">
+                                                        {isSeries ? `${groupInfo.episodes_count || versionsCount} Bölüm` : `${versionsCount} Sürüm`}
+                                                    </span>
+                                                )
                                             )}
                                         </div>
 
-                                        {/* Center Quick Play Overlay Button */}
+                                        {/* Center Quick Play / View Details Button */}
                                         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20 bg-black/40 backdrop-blur-xs">
                                             <Link
                                                 href={route('media.show', item.id)}
@@ -332,7 +341,17 @@ export default function MediaIndex({ media, allGenres = [], filters = {}, quota 
                                         <div>
                                             <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium mb-1">
                                                 <span>{item.year || '2024'}</span>
-                                                {sizeGb && <span className="font-mono text-indigo-300 font-bold">{sizeGb} GB</span>}
+                                                {isSeries ? (
+                                                    <span className="font-semibold text-indigo-300">
+                                                        {groupInfo.seasons?.length ? `${groupInfo.seasons.join(',')}. Sezon` : `${groupInfo.episodes_count || 1} Bölüm`}
+                                                    </span>
+                                                ) : (
+                                                    versionsCount > 1 ? (
+                                                        <span className="font-semibold text-emerald-300">{versionsCount} Versiyon</span>
+                                                    ) : (
+                                                        totalSizeGb && <span className="font-mono text-indigo-300 font-bold">{totalSizeGb} GB</span>
+                                                    )
+                                                )}
                                             </div>
                                             <Link href={route('media.show', item.id)}>
                                                 <h3 className="font-display font-bold text-sm text-white group-hover:text-indigo-300 transition-colors line-clamp-1">

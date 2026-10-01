@@ -6,12 +6,13 @@ use App\Models\Media;
 use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class TmdbService
 {
     protected string $baseUrl = 'https://api.themoviedb.org/3';
+
     protected ?string $apiKey;
+
     protected ?string $bearerToken;
 
     public function __construct()
@@ -22,41 +23,74 @@ class TmdbService
 
     /**
      * Clean raw file name or media title to extract clean search title and year.
+     * Uses media server (Plex / Jellyfin / Emby) title-boundary extraction.
      */
     public function cleanTitle(string $rawTitle): array
     {
-        // Remove extension if present
+        // 1. Remove extension if present
         $clean = pathinfo($rawTitle, PATHINFO_FILENAME);
 
-        // Replace dots and underscores with spaces
-        $clean = str_replace(['.', '_', '+'], ' ', $clean);
-
-        // Extract year
+        // 2. Extract 4-digit year (1900 - 2099) and Season/Episode tag positions
         $year = null;
-        if (preg_match('/\b(19\d{2}|20\d{2})\b/', $clean, $matches)) {
-            $year = (int) $matches[1];
+        $yearPos = null;
+        $seasonPos = null;
+
+        if (preg_match('/\b(19\d{2}|20\d{2})\b/', $clean, $yearMatches, PREG_OFFSET_CAPTURE)) {
+            $year = (int) $yearMatches[1][0];
+            $yearPos = $yearMatches[1][1];
         }
 
-        // Remove typical scene release tags
+        if (preg_match('/\b(S\d{1,2}(?:E\d{1,2})?|\d{1,2}x\d{1,2})\b/i', $clean, $seasonMatches, PREG_OFFSET_CAPTURE)) {
+            $seasonPos = $seasonMatches[0][1];
+        }
+
+        // 3. Media Server Rule: If Year or Season tag exists, everything BEFORE it is the Title
+        $cutoffPos = null;
+        if ($yearPos !== null && $seasonPos !== null) {
+            $cutoffPos = min($yearPos, $seasonPos);
+        } elseif ($yearPos !== null) {
+            $cutoffPos = $yearPos;
+        } elseif ($seasonPos !== null) {
+            $cutoffPos = $seasonPos;
+        }
+
+        if ($cutoffPos !== null && $cutoffPos > 0) {
+            $titlePart = substr($clean, 0, $cutoffPos);
+        } else {
+            $titlePart = $clean;
+        }
+
+        // 4. Replace dots, underscores, pluses, hyphens with spaces
+        $titlePart = str_replace(['.', '_', '+', '-'], ' ', $titlePart);
+
+        // 5. Remove domain names or site tags like site.com
+        $titlePart = preg_replace('/\b[a-z0-9]+\.(com|net|org|co|tv|me|io|xyz|top)\b/i', ' ', $titlePart);
+
+        // 6. Remove scene release tags, quality prefixes, release groups, and site watermarks
         $removePatterns = [
-            '/\b(1080p|720p|2160p|4k|uhd|hd|sd|bluray|bdrip|brrip|web-dl|webrip|hdtv|dvdrip)\b/i',
-            '/\b(x264|x265|hevc|h264|h265|avc|10bit|remux)\b/i',
-            '/\b(aac|ac3|dts|truehd|atmos|dual|tr|eng|subbed|dubbed|turkish|english)\b/i',
+            '/uHDFilmindir/i',
+            '/Filmindir/i',
+            '/DivxUp/i',
+            '/\b(m1080p|m720p|m2160p|m4k|1080p|720p|2160p|4k|uhd|hd|sd|bluray|blu\s*ray|bdrip|bd\s*rip|brrip|br\s*rip|web\s*dl|webrip|web\s*rip|hdtv|dvdrip|remux)\b/i',
+            '/\b(x264|x265|hevc|h264|h265|avc|10bit|remux|hdr|hdr10|dv|dovi)\b/i',
+            '/\b(aac|ac3|dts|dts\s*hd|truehd|atmos|dual|duall|tr|eng|subbed|dubbed|turkish|english)\b/i',
             '/\b(repack|proper|unrated|extended|director|cut|edition)\b/i',
-            '/\bS\d{1,2}E\d{1,2}\b/i', // S01E01 pattern
-            '/\b\d{4}\b/', // remove 4 digit year from clean title string
+            '/\b(rarbg|sparks|evo|flux|yify|yts|ntg|cmrg|viaplay|hmax|dsnp|amzn|nf|hbo|appletv|framestor|geckos|amiable|w4f|lol|eztv|fleet)\b/i',
             '/\[.*?\]/', // [Group]
             '/\(.*?\)/', // (Extra info)
         ];
 
         foreach ($removePatterns as $pattern) {
-            $clean = preg_replace($pattern, ' ', $clean);
+            $titlePart = preg_replace($pattern, ' ', $titlePart);
         }
 
-        $clean = trim(preg_replace('/\s+/', ' ', $clean));
+        // 7. Remove single-character noise letters left over
+        $titlePart = preg_replace('/\b[a-z]\b/i', ' ', $titlePart);
+
+        $cleanTitleStr = trim(preg_replace('/\s+/', ' ', $titlePart));
 
         return [
-            'title' => $clean ?: $rawTitle,
+            'title' => $cleanTitleStr ?: $rawTitle,
             'year' => $year,
         ];
     }
@@ -88,17 +122,25 @@ class TmdbService
 
             $response = Http::withOptions(['verify' => false])
                 ->timeout(10)
-                ->get($this->baseUrl . $endpoint, $params);
+                ->get($this->baseUrl.$endpoint, $params);
 
             if ($response->failed()) {
-                Log::warning('TMDB API Search failed: ' . $response->body());
+                Log::warning('TMDB API Search failed: '.$response->body());
+
                 return [];
             }
 
             $data = $response->json();
+            if (isset($data['success']) && $data['success'] === false) {
+                Log::warning('TMDB API Error: '.($data['status_message'] ?? 'Unknown TMDB error'));
+
+                return [];
+            }
+
             return $data['results'] ?? [];
         } catch (Exception $e) {
-            Log::error('TMDB Search exception: ' . $e->getMessage());
+            Log::error('TMDB Search exception: '.$e->getMessage());
+
             return [];
         }
     }
@@ -132,7 +174,8 @@ class TmdbService
 
             return $fallback->successful() ? $fallback->json() : null;
         } catch (Exception $e) {
-            Log::error('TMDB Movie Details Exception: ' . $e->getMessage());
+            Log::error('TMDB Movie Details Exception: '.$e->getMessage());
+
             return null;
         }
     }
@@ -165,38 +208,85 @@ class TmdbService
 
             return $fallback->successful() ? $fallback->json() : null;
         } catch (Exception $e) {
-            Log::error('TMDB TV Details Exception: ' . $e->getMessage());
+            Log::error('TMDB TV Details Exception: '.$e->getMessage());
+
             return null;
         }
     }
 
     /**
-     * Automatically search TMDB by title/year and fetch details.
+     * Automatically search TMDB by title/year using Plex/Jellyfin multi-stage fallback algorithm.
      */
     public function autoMatch(string $title, ?string $type = 'movie', ?int $year = null): ?array
     {
         $cleanInfo = $this->cleanTitle($title);
         $searchTitle = $cleanInfo['title'];
         $searchYear = $year ?: $cleanInfo['year'];
+        $targetType = ($type === 'movie') ? 'movie' : 'tv';
 
-        $results = $this->search($searchTitle, $type === 'movie' ? 'movie' : 'tv', $searchYear);
+        $results = [];
 
+        // Stage 1: Search target type WITH year
+        if ($searchYear) {
+            $results = $this->search($searchTitle, $targetType, $searchYear);
+        }
+
+        // Stage 2: Search target type WITHOUT year restriction (Plex/Emby fallback)
         if (empty($results)) {
-            // Try multi search if specific type gave no results
+            $results = $this->search($searchTitle, $targetType, null);
+        }
+
+        // Stage 3: Try multi-search WITH year
+        if (empty($results) && $searchYear) {
             $results = $this->search($searchTitle, 'multi', $searchYear);
+        }
+
+        // Stage 4: Try multi-search WITHOUT year restriction
+        if (empty($results)) {
+            $results = $this->search($searchTitle, 'multi', null);
+        }
+
+        // Stage 5: Try searching first 3 main words
+        if (empty($results)) {
+            $words = explode(' ', $searchTitle);
+            if (count($words) > 3) {
+                $shortTitle = implode(' ', array_slice($words, 0, 3));
+                $results = $this->search($shortTitle, $targetType, null);
+                if (empty($results)) {
+                    $results = $this->search($shortTitle, 'multi', null);
+                }
+            }
         }
 
         if (empty($results)) {
             return null;
         }
 
-        $top = $results[0];
-        $mediaType = $top['media_type'] ?? ($type === 'movie' ? 'movie' : 'tv');
+        // Pick candidate with best title match score
+        $bestMatch = $results[0];
+        $bestScore = -1;
+
+        foreach ($results as $candidate) {
+            $candidateTitle = $candidate['title'] ?? $candidate['name'] ?? $candidate['original_title'] ?? '';
+            similar_text(mb_strtolower($searchTitle), mb_strtolower($candidateTitle), $percent);
+
+            $candYear = isset($candidate['release_date']) ? (int) substr($candidate['release_date'], 0, 4) : (isset($candidate['first_air_date']) ? (int) substr($candidate['first_air_date'], 0, 4) : null);
+            if ($searchYear && $candYear && $searchYear === $candYear) {
+                $percent += 15; // Bonus for exact year match
+            }
+
+            if ($percent > $bestScore) {
+                $bestScore = $percent;
+                $bestMatch = $candidate;
+            }
+        }
+
+        $mediaType = $bestMatch['media_type'] ?? ($type === 'movie' ? 'movie' : 'tv');
 
         if ($mediaType === 'movie') {
-            return $this->getMovieDetails($top['id']);
+            return $this->getMovieDetails($bestMatch['id']);
         } else {
-            return $this->getTvDetails($top['id']);
+            return $this->getTvDetails($bestMatch['id']);
         }
     }
 
@@ -205,19 +295,27 @@ class TmdbService
      */
     public function fetchAndApply(Media $media, ?int $tmdbId = null): bool
     {
+        $targetTmdbId = $tmdbId ?: $media->tmdb_id;
         $details = null;
 
-        if ($tmdbId) {
-            $details = $media->type->value === 'movie' 
-                ? $this->getMovieDetails($tmdbId)
-                : $this->getTvDetails($tmdbId);
+        if ($targetTmdbId) {
+            $details = $media->type->value === 'movie'
+                ? $this->getMovieDetails($targetTmdbId)
+                : $this->getTvDetails($targetTmdbId);
+
+            if (! $details) {
+                $details = $media->type->value === 'movie'
+                    ? $this->getTvDetails($targetTmdbId)
+                    : $this->getMovieDetails($targetTmdbId);
+            }
         }
 
-        if (!$details) {
-            $details = $this->autoMatch($media->title, $media->type->value, $media->year);
+        if (! $details) {
+            $searchString = $media->file_name ?: $media->title;
+            $details = $this->autoMatch($searchString, $media->type->value, $media->year);
         }
 
-        if (!$details) {
+        if (! $details) {
             return false;
         }
 
@@ -229,7 +327,7 @@ class TmdbService
         $year = $releaseDate ? (int) substr($releaseDate, 0, 4) : $media->year;
 
         $genres = [];
-        if (!empty($details['genres'])) {
+        if (! empty($details['genres'])) {
             foreach ($details['genres'] as $g) {
                 $genres[] = $g['name'];
             }

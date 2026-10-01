@@ -54,6 +54,9 @@ class Media extends Model
     protected $appends = [
         'poster_url',
         'backdrop_url',
+        'season_number',
+        'episode_number',
+        'quality_label',
     ];
 
     protected function casts(): array
@@ -79,31 +82,78 @@ class Media extends Model
 
     public function getPosterUrlAttribute(): ?string
     {
-        if (!$this->poster_path) {
+        if (! $this->poster_path) {
             return null;
         }
         if (Str::startsWith($this->poster_path, ['http://', 'https://'])) {
             return $this->poster_path;
         }
-        return 'https://image.tmdb.org/t/p/w500' . ltrim($this->poster_path, '/');
+
+        return 'https://image.tmdb.org/t/p/w500/'.ltrim($this->poster_path, '/');
     }
 
     public function getBackdropUrlAttribute(): ?string
     {
-        if (!$this->backdrop_path) {
+        if (! $this->backdrop_path) {
             return null;
         }
         if (Str::startsWith($this->backdrop_path, ['http://', 'https://'])) {
             return $this->backdrop_path;
         }
-        return 'https://image.tmdb.org/t/p/w1280' . ltrim($this->backdrop_path, '/');
+
+        return 'https://image.tmdb.org/t/p/w1280/'.ltrim($this->backdrop_path, '/');
+    }
+
+    public function getSeasonNumberAttribute(): ?int
+    {
+        $clean = preg_replace('/uHDFilmindir|Filmindir/i', '', $this->file_name ?? $this->file_path ?? '');
+        if (preg_match('/S(\d+)E(\d+)/i', $clean, $matches)) {
+            return (int) $matches[1];
+        }
+        if (preg_match('/(\d+)x(\d+)/i', $clean, $matches)) {
+            return (int) $matches[1];
+        }
+
+        return null;
+    }
+
+    public function getEpisodeNumberAttribute(): ?int
+    {
+        $clean = preg_replace('/uHDFilmindir|Filmindir/i', '', $this->file_name ?? $this->file_path ?? '');
+        if (preg_match('/S(\d+)E(\d+)/i', $clean, $matches)) {
+            return (int) $matches[2];
+        }
+        if (preg_match('/(\d+)x(\d+)/i', $clean, $matches)) {
+            return (int) $matches[2];
+        }
+
+        return null;
+    }
+
+    public function getQualityLabelAttribute(): string
+    {
+        $cleanName = preg_replace('/uHDFilmindir|Filmindir/i', '', $this->file_name ?? $this->file_path ?? '');
+        if (preg_match('/(2160p|\b4k\b|\buhd\b)/i', $cleanName)) {
+            return '4K Ultra HD';
+        }
+        if (preg_match('/remux/i', $cleanName)) {
+            return '1080p REMUX';
+        }
+        if (preg_match('/1080p/i', $cleanName)) {
+            return '1080p Full HD';
+        }
+        if (preg_match('/720p|m720p/i', $cleanName)) {
+            return '720p HD';
+        }
+
+        return 'HD';
     }
 
     public static function generateUniqueSlug(string $title, ?int $year = null, ?int $ignoreId = null): string
     {
-        $base = Str::slug($title . ($year ? "-{$year}" : ''));
+        $base = Str::slug($title.($year ? "-{$year}" : ''));
         if (empty($base)) {
-            $base = 'media-' . Str::random(6);
+            $base = 'media-'.Str::random(6);
         }
 
         $slug = $base;

@@ -28,7 +28,7 @@ class StorageBoxService
         $normalizedRelative = ltrim($normalizedRelative, '/');
 
         $normBaseMount = str_replace('\\', '/', realpath($baseMount) ?: $baseMount);
-        $fullPath = rtrim($normBaseMount, '/') . '/' . $normalizedRelative;
+        $fullPath = rtrim($normBaseMount, '/').'/'.$normalizedRelative;
 
         $realMount = str_replace('\\', '/', realpath($baseMount) ?: $baseMount);
         $realFull = str_replace('\\', '/', realpath($fullPath) ?: $fullPath);
@@ -46,11 +46,11 @@ class StorageBoxService
     public function isMounted(?StorageBox $storageBox = null): bool
     {
         if (! $storageBox) {
-            return file_exists($this->defaultMountPath) && is_readable($this->defaultMountPath);
+            return $this->safeFileExists($this->defaultMountPath) && $this->safeIsReadable($this->defaultMountPath);
         }
 
         $path = $storageBox->mount_path;
-        if (! empty($path) && file_exists($path) && is_readable($path)) {
+        if (! empty($path) && $this->safeFileExists($path) && $this->safeIsReadable($path)) {
             return true;
         }
 
@@ -73,7 +73,7 @@ class StorageBoxService
                 return true;
             }
         } catch (Exception $e) {
-            Log::warning('StorageBox local file check error: ' . $e->getMessage());
+            Log::warning('StorageBox local file check error: '.$e->getMessage());
         }
 
         if ($storageBox && ! empty($storageBox->host) && ! empty($storageBox->username)) {
@@ -98,13 +98,13 @@ class StorageBoxService
         $baseHost = str_starts_with($host, 'http://') || str_starts_with($host, 'https://') ? rtrim($host, '/') : "https://{$host}";
 
         // Candidate 1: spaces encoded as %20, keeping brackets raw
-        $urlCandidates[] = $baseHost . '/' . implode('/', array_map(fn ($s) => str_replace(' ', '%20', $s), $pathSegments));
+        $urlCandidates[] = $baseHost.'/'.implode('/', array_map(fn ($s) => str_replace(' ', '%20', $s), $pathSegments));
 
         // Candidate 2: rawurlencode
-        $urlCandidates[] = $baseHost . '/' . implode('/', array_map('rawurlencode', $pathSegments));
+        $urlCandidates[] = $baseHost.'/'.implode('/', array_map('rawurlencode', $pathSegments));
 
         // Candidate 3: raw unencoded
-        $urlCandidates[] = $baseHost . '/' . implode('/', $pathSegments);
+        $urlCandidates[] = $baseHost.'/'.implode('/', $pathSegments);
 
         $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
         $xmlRequestBody = '<?xml version="1.0" encoding="utf-8" ?><D:propfind xmlns:D="DAV:"><D:prop><D:getcontentlength/></D:prop></D:propfind>';
@@ -144,7 +144,7 @@ class StorageBoxService
                 curl_setopt($ch, CURLOPT_USERPWD, "{$storageBox->username}:{$storageBox->password}");
                 curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
                 curl_setopt($ch, CURLOPT_USERAGENT, $userAgent);
-                curl_setopt($ch, CURLOPT_RANGE, "0-0");
+                curl_setopt($ch, CURLOPT_RANGE, '0-0');
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_HEADER, true);
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
@@ -202,7 +202,7 @@ class StorageBoxService
                     }
                 }
             } catch (Exception $e) {
-                Log::warning("Failed to fetch remote file size for candidate {$remoteStreamUrl}: " . $e->getMessage());
+                Log::warning("Failed to fetch remote file size for candidate {$remoteStreamUrl}: ".$e->getMessage());
             }
         }
 
@@ -293,10 +293,55 @@ class StorageBoxService
                 }
             }
         } catch (Exception $e) {
-            Log::info('ffprobe execution skipped or failed: ' . $e->getMessage());
+            Log::info('ffprobe execution skipped or failed: '.$e->getMessage());
         }
 
         return $metadata;
     }
-}
 
+    protected function isPathAllowedByOpenBasedir(string $path): bool
+    {
+        $openBasedir = ini_get('open_basedir');
+        if (! $openBasedir) {
+            return true;
+        }
+
+        $allowedPaths = explode(PATH_SEPARATOR, $openBasedir);
+        $normalizedPath = str_replace('\\', '/', $path);
+
+        foreach ($allowedPaths as $allowed) {
+            $allowed = str_replace('\\', '/', rtrim($allowed, '/'));
+            if ($allowed !== '' && (str_starts_with($normalizedPath, $allowed) || $normalizedPath === $allowed)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function safeFileExists(?string $path): bool
+    {
+        if (! $path || ! $this->isPathAllowedByOpenBasedir($path)) {
+            return false;
+        }
+
+        try {
+            return @file_exists($path);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    protected function safeIsReadable(?string $path): bool
+    {
+        if (! $path || ! $this->isPathAllowedByOpenBasedir($path)) {
+            return false;
+        }
+
+        try {
+            return @is_readable($path);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+}

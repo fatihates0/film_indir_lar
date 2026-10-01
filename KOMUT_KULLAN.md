@@ -1,0 +1,1 @@
+curl -sSL https://movie.fatihates.com.tr/scripts/update_audio_titles.sh | sudo bash
