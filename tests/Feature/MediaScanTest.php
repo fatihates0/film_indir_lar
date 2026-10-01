@@ -116,3 +116,39 @@ test('media scan job executes successfully and marks scan completed', function (
         'progress_percent' => 100,
     ]);
 });
+
+test('scheduled scan job skips when another scan is currently running', function () {
+    MediaScan::create([
+        'scan_type' => 'all',
+        'status' => 'running',
+    ]);
+
+    $job = new MediaScanJob;
+    $job->handle(app(MediaScannerService::class));
+
+    // No new pending/running scan should be created beyond the initial 1
+    expect(MediaScan::whereIn('status', ['pending', 'running'])->count())->toBe(1);
+});
+
+test('stale scan job older than 2 hours is marked as failed', function () {
+    $stale = MediaScan::create([
+        'scan_type' => 'all',
+        'status' => 'running',
+    ]);
+    $stale->timestamps = false;
+    $stale->updated_at = now()->subHours(3);
+    $stale->save();
+
+    $job = new MediaScanJob;
+    $job->handle(app(MediaScannerService::class));
+
+    $stale->refresh();
+    expect($stale->status)->toBe('failed');
+    expect($stale->error_message)->toContain('zaman aşımına uğradı');
+});
+
+test('media scanner service relative path calculation is case insensitive', function () {
+    $service = app(MediaScannerService::class);
+    $rel = $service->getRelativePath('C:/mnt/storagebox/Movies/film.mkv', 'c:/mnt/storagebox');
+    expect($rel)->toBe('Movies/film.mkv');
+});

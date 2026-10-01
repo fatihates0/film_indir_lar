@@ -30,7 +30,24 @@ class MediaScanJob implements ShouldQueue
      */
     public function handle(MediaScannerService $scannerService): void
     {
+        // 1. Temizlik: 2 saattir güncellenmeyen takılı kalmış taramaları zaman aşımına uğrat
+        MediaScan::whereIn('status', ['pending', 'running'])
+            ->where('updated_at', '<', now()->subHours(2))
+            ->update([
+                'status' => 'failed',
+                'error_message' => 'Tarama işlemi zaman aşımına uğradı (otomatik temizlendi).',
+                'completed_at' => now(),
+            ]);
+
+        // 2. Zamanlanmış (otomatik) tarama kontrolü
         if (! $this->mediaScanId) {
+            $activeScan = MediaScan::whereIn('status', ['pending', 'running'])->first();
+            if ($activeScan) {
+                Log::info("Zaten aktif bir tarama işlemi (ID: {$activeScan->id}) mevcut. Zamanlanmış MediaScanJob atlandı.");
+
+                return;
+            }
+
             $scan = MediaScan::create([
                 'scan_type' => 'all',
                 'status' => 'pending',
@@ -83,13 +100,22 @@ class MediaScanJob implements ShouldQueue
                 Log::info("MediaScanJob başarıyla tamamlandı (ID: {$this->mediaScanId})", $result);
             }
         } catch (\Throwable $e) {
-            Log::error("MediaScanJob hatası (ID: {$this->mediaScanId}): ".$e->getMessage());
-
             $scan->refresh();
-            if ($scan->status !== 'cancelled') {
+            if ($e->getMessage() === 'Tarama kullanıcı tarafından iptal edildi.') {
+                Log::info("MediaScanJob kullanıcı tarafından iptal edildi (ID: {$this->mediaScanId})");
+                $scan->update([
+                    'status' => 'cancelled',
+                    'completed_at' => now(),
+                    'current_target' => 'İptal Edildi',
+                ]);
+            } else {
+                Log::error("MediaScanJob hatası (ID: {$this->mediaScanId}): ".$e->getMessage(), [
+                    'exception' => $e,
+                ]);
+
                 $scan->update([
                     'status' => 'failed',
-                    'error_message' => $e->getMessage(),
+                    'error_message' => mb_substr($e->getMessage(), 0, 1000),
                     'completed_at' => now(),
                     'current_target' => 'Hata oluştu',
                 ]);
