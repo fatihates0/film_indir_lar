@@ -43,8 +43,8 @@ export default function MediaShow({
     const genresList = Array.isArray(item.genres)
         ? item.genres
         : typeof item.genres === 'string'
-        ? item.genres.split(',')
-        : [];
+            ? item.genres.split(',')
+            : [];
 
     const handleDownloadSingle = async (targetItem) => {
         const targetId = targetItem?.id || item.id;
@@ -57,10 +57,10 @@ export default function MediaShow({
                 const targetSizeGb = targetItem?.size_gb
                     ? targetItem.size_gb
                     : targetItem?.file_size
-                    ? (targetItem.file_size / 1073741824).toFixed(2)
-                    : item.file_size
-                    ? (item.file_size / 1073741824).toFixed(2)
-                    : '0.00';
+                        ? (targetItem.file_size / 1073741824).toFixed(2)
+                        : item.file_size
+                            ? (item.file_size / 1073741824).toFixed(2)
+                            : '0.00';
 
                 setDownloadModal({
                     itemTitle: targetItem?.title || item.title,
@@ -244,11 +244,10 @@ export default function MediaShow({
                                     <button
                                         key={s.season_number}
                                         onClick={() => setSelectedSeason(s.season_number)}
-                                        className={`px-5 py-2.5 rounded-2xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2 ${
-                                            selectedSeason === s.season_number
-                                                ? 'gradient-button text-white shadow-glow-purple scale-105'
-                                                : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
-                                        }`}
+                                        className={`px-5 py-2.5 rounded-2xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2 ${selectedSeason === s.season_number
+                                            ? 'gradient-button text-white shadow-glow-purple scale-105'
+                                            : 'glass-panel text-slate-300 hover:text-white hover:border-white/20'
+                                            }`}
                                     >
                                         <span>{s.title}</span>
                                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 text-slate-300">
@@ -321,7 +320,7 @@ export default function MediaShow({
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 text-left">
                         <div>
                             <h2 className="font-display font-bold text-2xl text-white flex items-center gap-3">
-                                <span>🎞️ Kalite & Sürüm Seçenekleri</span>
+                                <span>Kalite & Sürüm Seçenekleri</span>
                                 <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                                     {versionsData.length} Sürüm / Kalite Mevcut
                                 </span>
@@ -386,7 +385,7 @@ export default function MediaShow({
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-4">
                             <div>
                                 <h2 className="font-display font-bold text-2xl text-white flex items-center gap-3">
-                                    <span>🎭 Oyuncu Kadrosu</span>
+                                    <span>Oyuncu Kadrosu</span>
                                     <span className="text-xs font-semibold px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
                                         {castList.length} Oyuncu
                                     </span>

@@ -376,11 +376,17 @@ class MediaAdminController extends Controller
 
     public function syncAllTmdb(): RedirectResponse
     {
-        $allMedia = Media::all();
+        $unSyncedMedia = Media::whereNull('tmdb_id')->orWhere('tmdb_id', 0)->get();
+        $totalAlreadySynced = Media::whereNotNull('tmdb_id')->where('tmdb_id', '>', 0)->count();
+
+        if ($unSyncedMedia->isEmpty()) {
+            return back()->with('message', sprintf('Tüm içeriklerin (%d medya) TMDB bilgileri zaten çekilmiş durumda.', $totalAlreadySynced));
+        }
+
         $count = 0;
         $failed = 0;
 
-        foreach ($allMedia as $media) {
+        foreach ($unSyncedMedia as $media) {
             if ($this->tmdbService->fetchAndApply($media)) {
                 $count++;
             } else {
@@ -389,10 +395,10 @@ class MediaAdminController extends Controller
         }
 
         if ($count === 0 && $failed > 0) {
-            return back()->with('error', 'TMDB bilgileri çekilemedi. Lütfen geçerli bir TMDB API Anahtarı (TMDB_API_KEY) tanımlandığından emin olun.');
+            return back()->with('error', 'Eşitlenmeyen medyalar için TMDB bilgileri çekilemedi. Lütfen geçerli bir TMDB API Anahtarı (TMDB_API_KEY) tanımlandığından emin olun.');
         }
 
-        return back()->with('message', sprintf('%d medya için TMDB bilgileri başarıyla çekildi (%d medya eşleşmedi).', $count, $failed));
+        return back()->with('message', sprintf('%d yeni medya için TMDB bilgileri başarıyla çekildi (%d medya zaten eşleşmişti).', $count, $totalAlreadySynced));
     }
 
     public function destroy(Media $media): RedirectResponse
@@ -407,6 +413,44 @@ class MediaAdminController extends Controller
         $media->delete();
 
         return back()->with('message', 'Medya kütüphaneden silindi.');
+    }
+
+    public function bulkDelete(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'ids' => ['nullable', 'array'],
+            'ids.*' => ['integer', 'exists:media,id'],
+            'delete_all' => ['nullable', 'boolean'],
+        ]);
+
+        if (! empty($validated['delete_all'])) {
+            $count = Media::count();
+            Media::query()->delete();
+
+            $this->auditLogService->log(
+                action: 'media_bulk_deleted_all',
+                targetType: 'Media',
+                newValues: ['count' => $count]
+            );
+
+            return back()->with('message', sprintf('Tüm arşiv (%d içerik) kütüphaneden başarıyla silindi.', $count));
+        }
+
+        $ids = $validated['ids'] ?? [];
+        if (empty($ids)) {
+            return back()->with('error', 'Lütfen silinecek en az bir içerik seçin.');
+        }
+
+        $count = Media::whereIn('id', $ids)->count();
+        Media::whereIn('id', $ids)->delete();
+
+        $this->auditLogService->log(
+            action: 'media_bulk_deleted',
+            targetType: 'Media',
+            newValues: ['count' => $count, 'ids' => $ids]
+        );
+
+        return back()->with('message', sprintf('Seçilen %d içerik kütüphaneden silindi.', $count));
     }
 
     public function destroySeason(Request $request, Media $media): RedirectResponse

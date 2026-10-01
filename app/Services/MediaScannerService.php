@@ -229,7 +229,7 @@ class MediaScannerService
         $iterator = new \RecursiveIteratorIterator(
             $filterIterator,
             \RecursiveIteratorIterator::SELF_FIRST,
-            \RecursiveIteratorIterator::CATCH_GET_CHILDREN
+            \RecursiveIteratorIterator::CATCH_GET_CHILD
         );
 
         foreach ($iterator as $file) {
@@ -274,17 +274,13 @@ class MediaScannerService
                         }
                     }
 
-                    $query = Media::where(function ($q) use ($relativePath, $fullPath, $normFullPath) {
+                    $existing = Media::where(function ($q) use ($relativePath, $fullPath, $normFullPath, $fileName) {
                         $q->where('file_path', $relativePath)
                             ->orWhere('file_path', str_replace('/', '\\', $relativePath))
                             ->orWhere('file_path', $fullPath)
-                            ->orWhere('file_path', $normFullPath);
-                    });
-
-                    if ($storageBox) {
-                        $query->where('storage_box_id', $storageBox->id);
-                    }
-                    $existing = $query->first();
+                            ->orWhere('file_path', $normFullPath)
+                            ->orWhere('file_name', $fileName);
+                    })->first();
 
                     if ($existing && $existing->file_path !== $relativePath) {
                         $existing->update(['file_path' => $relativePath]);
@@ -485,9 +481,11 @@ class MediaScannerService
                             }
                         }
 
-                        $existing = Media::where('storage_box_id', $storageBox->id)
-                            ->where('file_path', $itemRelativePath)
-                            ->first();
+                        $existing = Media::where(function ($q) use ($itemRelativePath, $name) {
+                            $q->where('file_path', $itemRelativePath)
+                                ->orWhere('file_path', str_replace('/', '\\', $itemRelativePath))
+                                ->orWhere('file_name', $name);
+                        })->first();
 
                         if (! $existing) {
                             $cleanInfo = $this->tmdbService->cleanTitle($name);

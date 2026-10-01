@@ -57,6 +57,93 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
     const [syncingAll, setSyncingAll] = useState(false);
     const [syncingId, setSyncingId] = useState(null);
 
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [deletingBulk, setDeletingBulk] = useState(false);
+
+    const getAllPageVersionIds = () => {
+        const ids = [];
+        if (media?.data) {
+            media.data.forEach((m) => {
+                if (m.versions && m.versions.length > 0) {
+                    m.versions.forEach((v) => ids.push(v.id));
+                } else {
+                    ids.push(m.id);
+                }
+            });
+        }
+        return ids;
+    };
+
+    const isAllSelected = () => {
+        const allIds = getAllPageVersionIds();
+        if (allIds.length === 0) return false;
+        return allIds.every((id) => selectedIds.includes(id));
+    };
+
+    const toggleSelectAll = () => {
+        const allIds = getAllPageVersionIds();
+        if (isAllSelected()) {
+            setSelectedIds(selectedIds.filter((id) => !allIds.includes(id)));
+        } else {
+            setSelectedIds(Array.from(new Set([...selectedIds, ...allIds])));
+        }
+    };
+
+    const getGroupVersionIds = (m) => {
+        return m.versions && m.versions.length > 0 ? m.versions.map((v) => v.id) : [m.id];
+    };
+
+    const isGroupSelected = (m) => {
+        const gIds = getGroupVersionIds(m);
+        return gIds.length > 0 && gIds.every((id) => selectedIds.includes(id));
+    };
+
+    const toggleSelectGroup = (m) => {
+        const gIds = getGroupVersionIds(m);
+        if (isGroupSelected(m)) {
+            setSelectedIds(selectedIds.filter((id) => !gIds.includes(id)));
+        } else {
+            setSelectedIds(Array.from(new Set([...selectedIds, ...gIds])));
+        }
+    };
+
+    const toggleSelectId = (id) => {
+        if (selectedIds.includes(id)) {
+            setSelectedIds(selectedIds.filter((item) => item !== id));
+        } else {
+            setSelectedIds([...selectedIds, id]);
+        }
+    };
+
+    const handleBulkDeleteSelected = () => {
+        if (selectedIds.length === 0) return;
+        if (confirm(`Seçilen ${selectedIds.length} içeriği kütüphaneden silmek istediğinize emin misiniz?`)) {
+            setDeletingBulk(true);
+            router.post(route('admin.media.bulk-delete'), { ids: selectedIds }, {
+                onSuccess: () => {
+                    setSelectedIds([]);
+                    setDeletingBulk(false);
+                },
+                onError: () => setDeletingBulk(false),
+            });
+        }
+    };
+
+    const handleClearEntireArchive = () => {
+        if (confirm('DİKKAT: Kütüphanedeki TÜM içerikleri silmek istediğinize emin misiniz?\n\nBu işlem tüm arşiv kayıtlarını temizler ve geri alınamaz!')) {
+            if (confirm('Tüm arşivi silmek için son onay veriyor musunuz?')) {
+                setDeletingBulk(true);
+                router.post(route('admin.media.bulk-delete'), { delete_all: true }, {
+                    onSuccess: () => {
+                        setSelectedIds([]);
+                        setDeletingBulk(false);
+                    },
+                    onError: () => setDeletingBulk(false),
+                });
+            }
+        }
+    };
+
     const openPicker = () => {
         setIsPickerOpen(true);
         setSelectedBox(null);
@@ -253,6 +340,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                         >
                             {scanning ? 'Taranıyor...' : 'Otomatik Tarama'}
                         </button>
+
+                        <button
+                            onClick={handleClearEntireArchive}
+                            disabled={deletingBulk}
+                            className="inline-flex items-center gap-2 rounded-xl bg-rose-600/20 hover:bg-rose-600 border border-rose-500/30 text-rose-300 hover:text-white px-4 py-2.5 text-xs font-semibold transition-all disabled:opacity-50"
+                        >
+                            {deletingBulk ? 'Siliniyor...' : 'Tüm Arşivi Temizle'}
+                        </button>
                     </div>
                 </div>
             }
@@ -263,6 +358,29 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                 {flash?.message && (
                     <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/30 p-4 text-xs text-emerald-300 flex items-center justify-between shadow-lg">
                         <span>{flash.message}</span>
+                    </div>
+                )}
+
+                {selectedIds.length > 0 && (
+                    <div className="rounded-2xl bg-rose-500/10 border border-rose-500/30 p-4 text-xs text-rose-200 flex items-center justify-between shadow-lg animate-fadeIn">
+                        <div className="flex items-center gap-3">
+                            <span className="font-semibold">{selectedIds.length} içerik seçildi</span>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedIds([])}
+                                className="text-slate-400 hover:text-white underline text-[11px]"
+                            >
+                                Seçimi Temizle
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleBulkDeleteSelected}
+                            disabled={deletingBulk}
+                            className="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-xl font-bold transition-all disabled:opacity-50 shadow-md"
+                        >
+                            {deletingBulk ? 'Siliniyor...' : `Seçilenleri Sil (${selectedIds.length})`}
+                        </button>
                     </div>
                 )}
 
@@ -311,6 +429,14 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                         <table className="w-full text-left text-xs text-slate-300">
                             <thead className="bg-slate-950/80 text-[11px] font-semibold uppercase text-slate-400 border-b border-slate-800">
                                 <tr>
+                                    <th className="px-3 py-3.5 w-10 text-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={isAllSelected()}
+                                            onChange={toggleSelectAll}
+                                            className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                                        />
+                                    </th>
                                     <th className="px-4 py-3.5">Afiş & Başlık</th>
                                     <th className="px-4 py-3.5">TMDB Durum</th>
                                     <th className="px-4 py-3.5">Tür</th>
@@ -323,7 +449,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                             <tbody className="divide-y divide-slate-800/60">
                                 {media.data.length === 0 ? (
                                     <tr>
-                                        <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
+                                        <td colSpan="8" className="px-6 py-12 text-center text-slate-500">
                                             Kütüphanenizde henüz medya bulunmuyor. "Dosya Seç & Medya Ekle" butonundan ekleyebilirsiniz.
                                         </td>
                                     </tr>
@@ -345,6 +471,15 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                         isExpanded ? 'bg-slate-900/80' : ''
                                                     }`}
                                                 >
+                                                    {/* Checkbox */}
+                                                    <td className="px-3 py-3 w-10 text-center" onClick={(e) => e.stopPropagation()}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isGroupSelected(m)}
+                                                            onChange={() => toggleSelectGroup(m)}
+                                                            className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                                                        />
+                                                    </td>
                                                     {/* İçerik Başlığı & Detay */}
                                                     <td className="px-4 py-3">
                                                         <div className="flex items-center gap-3">
@@ -478,7 +613,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                 {/* NESTED VERSIONS LIST - FLUSH & SEAMLESS */}
                                                 {isExpanded && (
                                                     <tr className="bg-slate-950/90">
-                                                        <td colSpan="7" className="p-0">
+                                                        <td colSpan="8" className="p-0">
                                                             <div className="bg-slate-950/80 border-b border-slate-800">
                                                                 {(() => {
                                                                     const isSeriesGroup = m.type === 'series' || m.type === 'episode' || m.group_info?.is_series;
@@ -525,6 +660,12 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                         >
                                                                                             <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
                                                                                                 <span className="text-slate-600 text-xs font-mono select-none">└</span>
+                                                                                                <input
+                                                                                                    type="checkbox"
+                                                                                                    checked={selectedIds.includes(ver.id)}
+                                                                                                    onChange={() => toggleSelectId(ver.id)}
+                                                                                                    className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                                                                />
                                                                                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
                                                                                                     {ver.quality_label}
                                                                                                 </span>
@@ -583,6 +724,12 @@ export default function MediaAdminIndex({ media, storageBoxes = [], filters = {}
                                                                                 >
                                                                                     <div className="flex items-center gap-3 min-w-0 flex-1 pl-6">
                                                                                         <span className="text-slate-600 text-xs font-mono select-none">└</span>
+                                                                                        <input
+                                                                                            type="checkbox"
+                                                                                            checked={selectedIds.includes(ver.id)}
+                                                                                            onChange={() => toggleSelectId(ver.id)}
+                                                                                            className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                                                        />
                                                                                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
                                                                                             {ver.quality_label}
                                                                                         </span>
