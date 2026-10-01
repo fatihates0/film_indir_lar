@@ -243,12 +243,6 @@ interactive_setup() {
     esac
 
     echo ""
-    read_tty "Mevcut işlem önbelleği temizlensin mi (Tüm dosyalar sıfırdan taransın) [e/H]? " clear_choice
-    case "$clear_choice" in
-        [eE]|[yY]|evet|Evet) clear_cache ;;
-    esac
-
-    echo ""
     read_tty "Simülasyon Modu (Değişiklik yapmadan test et) [e/H]? " dry_choice
     case "$dry_choice" in
         [eE]|[yY]|evet|Evet) DRY_RUN=true ;;
