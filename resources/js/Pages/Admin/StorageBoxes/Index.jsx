@@ -55,7 +55,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                             missingCount: data.active_scan.missing_count || 0,
                             scannedTotal: data.active_scan.total_scanned || 0,
                         });
-                    } else if (activeScans.length > 0 || scanProgress.active) {
+                    } else if (activeScans.length > 0 || (scanProgress.active && !scanProgress.completed)) {
                         setActiveScans([]);
                         const latest = data.latest_scan;
                         if (latest && (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled')) {
@@ -74,6 +74,8 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                                 scannedTotal: latest.total_scanned || 0,
                             });
                             router.reload({ preserveScroll: true });
+                        } else {
+                            setScanProgress((prev) => ({ ...prev, active: false }));
                         }
                     }
                 }
@@ -82,7 +84,9 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
             }
         };
 
-        if (activeScans.length > 0 || scanProgress.active) {
+        const isScanning = activeScans.length > 0 || (scanProgress.active && !scanProgress.completed);
+
+        if (isScanning) {
             checkScanStatus();
             intervalId = setInterval(checkScanStatus, 2500);
         }
@@ -90,7 +94,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
         return () => {
             if (intervalId) clearInterval(intervalId);
         };
-    }, [activeScans.length > 0, scanProgress.active]);
+    }, [activeScans.length > 0, scanProgress.active, scanProgress.completed]);
 
     const cancelScan = async () => {
         const scanId = scanProgress.scanId || (activeScans.length > 0 ? activeScans[0].id : null);

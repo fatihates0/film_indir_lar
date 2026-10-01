@@ -119,6 +119,12 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
     useEffect(() => {
         let intervalId = null;
 
+        const isScanning = (scanning || (scanProgress.active && !scanProgress.completed));
+
+        if (!isScanning) {
+            return;
+        }
+
         const checkStatus = async () => {
             try {
                 const res = await fetch(route('admin.media.scan-status'));
@@ -140,24 +146,24 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
                         });
                     } else {
                         const latest = data.latest_scan;
-                        if (scanning || scanProgress.active) {
-                            setScanning(false);
-                            if (latest && (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled')) {
-                                setScanProgress({
-                                    active: true,
-                                    completed: true,
-                                    scanId: latest.id,
-                                    percent: 100,
-                                    currentTitle: latest.status === 'completed' 
-                                        ? 'Tüm Taramalar Tamamlandı!' 
-                                        : (latest.status === 'cancelled' ? 'Tarama İptal Edildi' : `Tarama Hatası: ${latest.error_message || ''}`),
-                                    addedCount: latest.added_count || 0,
-                                    updatedCount: latest.updated_count || 0,
-                                    missingCount: latest.missing_count || 0,
-                                    scannedTotal: latest.total_scanned || 0,
-                                });
-                                router.reload({ preserveScroll: true });
-                            }
+                        setScanning(false);
+                        if (latest && (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled')) {
+                            setScanProgress({
+                                active: true,
+                                completed: true,
+                                scanId: latest.id,
+                                percent: 100,
+                                currentTitle: latest.status === 'completed' 
+                                    ? 'Tüm Taramalar Tamamlandı!' 
+                                    : (latest.status === 'cancelled' ? 'Tarama İptal Edildi' : `Tarama Hatası: ${latest.error_message || ''}`),
+                                addedCount: latest.added_count || 0,
+                                updatedCount: latest.updated_count || 0,
+                                missingCount: latest.missing_count || 0,
+                                scannedTotal: latest.total_scanned || 0,
+                            });
+                            router.reload({ preserveScroll: true });
+                        } else {
+                            setScanProgress((prev) => ({ ...prev, active: false }));
                         }
                     }
                 }
@@ -166,15 +172,13 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
             }
         };
 
-        if (scanning || activeScan) {
-            checkStatus();
-            intervalId = setInterval(checkStatus, 2000);
-        }
+        checkStatus();
+        intervalId = setInterval(checkStatus, 2000);
 
         return () => {
             if (intervalId) clearInterval(intervalId);
         };
-    }, [scanning]);
+    }, [scanning, scanProgress.active, scanProgress.completed]);
 
     const [selectedIds, setSelectedIds] = useState([]);
     const [selectionMode, setSelectionMode] = useState(false);
