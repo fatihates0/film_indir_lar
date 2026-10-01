@@ -193,11 +193,23 @@ class MediaScannerService
     {
         $mountPath = $storageBox ? $storageBox->mount_path : config('storagebox.mount_path', storage_path('app/storagebox'));
 
-        // Yerel Mount Klasörü Mevcut Değilse ancak WebDAV/HTTP Bilgisi Varsa Uzaktan Tara
+        // Yerel Mount Klasörü Mevcut Değilse ancak Remote (WebDAV veya FTP/SFTP) Bilgisi Varsa Uzaktan Tara
         if (! $this->safeFileExists($mountPath) || ! $this->safeIsReadable($mountPath)) {
             if ($storageBox && ! empty($storageBox->host) && ! empty($storageBox->username) && ! empty($storageBox->password)) {
                 $storageBox->update(['status' => 'online']);
-                $remoteRes = $this->scanRemoteWebdav($storageBox, $subDirectory, $mediaScan);
+
+                if (in_array($storageBox->disk_type, ['ftp', 'sftp', 'pulsedmedia'], true)) {
+                    $remoteRes = $this->scanRemoteFtp($storageBox, $subDirectory, $mediaScan);
+                } else {
+                    $remoteRes = $this->scanRemoteWebdav($storageBox, $subDirectory, $mediaScan);
+                    if (empty($remoteRes['scanned_paths'])) {
+                        // WebDAV failed or returned 0 paths, attempt FTP fallback
+                        $ftpRes = $this->scanRemoteFtp($storageBox, $subDirectory, $mediaScan);
+                        if (! empty($ftpRes['scanned_paths'])) {
+                            $remoteRes = $ftpRes;
+                        }
+                    }
+                }
 
                 // Silinenleri kontrol et
                 $missingQuery = Media::where('is_available', true)->where('storage_box_id', $storageBox->id);
@@ -480,6 +492,7 @@ class MediaScannerService
                 $url = rtrim($host, '/').'/'.($cleanPath ? $cleanPath.'/' : '');
             }
             $url = rtrim($url, '/').'/';
+            $targetUrlPath = trim(parse_url($url, PHP_URL_PATH) ?: '', '/');
 
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
@@ -511,15 +524,15 @@ class MediaScannerService
 
             foreach ($xml->response as $resp) {
                 $href = rawurldecode((string) $resp->href);
-                $hrefPath = trim(parse_url($href, PHP_URL_PATH) ?: $href, '/');
+                $hrefPath = trim(parse_url($href, PHP_URL_PATH) ?: '', '/');
                 $name = basename($hrefPath);
 
                 if (empty($name) || $name === '.' || $name === '..' || Str::startsWith($name, ['$Recycle', '$RECYCLE', 'System Volume Information', '.Trash', '.git'])) {
                     continue;
                 }
 
-                $currentRelativeClean = trim(str_replace('\\', '/', $currentDir), '/');
-                if (strtolower($hrefPath) === strtolower($currentRelativeClean)) {
+                // Skip target directory itself being queried
+                if (strtolower($hrefPath) === strtolower($targetUrlPath)) {
                     continue;
                 }
 
@@ -539,10 +552,28 @@ class MediaScannerService
                 $itemRelativePath = $currentDir ? "{$currentDir}/{$name}" : $name;
 
                 if ($isDir) {
-                    $directoriesToScan[] = $itemRelativePath;
+                    if (! in_array($itemRelativePath, $directoriesToScan, true)) {
+                        $directoriesToScan[] = $itemRelativePath;
+                    }
                 } else {
                     $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
                     if (in_array($ext, $videoExtensions)) {
+                        if ($mediaScan && count($scannedPaths) % 2 === 0) {
+                            $mediaScan->refresh();
+                            if ($mediaScan->status === 'cancelled') {
+                                throw new \RuntimeException('Tarama kullanıcı tarafından iptal edildi.');
+                            }
+                            if ($mediaScan->scan_type !== 'all') {
+                                $calcPercent = min(95, max(5, (int) ((count($scannedPaths) / max(1, count($scannedPaths) + count($directoriesToScan) * 5)) * 100)));
+                                $mediaScan->update([
+                                    'total_scanned' => count($scannedPaths),
+                                    'added_count' => $added,
+                                    'updated_count' => $updated,
+                                    'progress_percent' => $calcPercent,
+                                    'current_target' => "{$name} taranıyor...",
+                                ]);
+                            }
+                        }
                         $scannedPaths[] = $itemRelativePath;
                         $title = pathinfo($name, PATHINFO_FILENAME);
 
@@ -675,5 +706,199 @@ class MediaScannerService
         } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    /**
+     * FTP üzerinden uzaktaki Storage Box (PulsedMedia vb.) dizinlerini özyinelemeli (recursive) tarar.
+     */
+    protected function scanRemoteFtp(StorageBox $storageBox, string $relativePath = '', ?MediaScan $mediaScan = null): array
+    {
+        if (empty($storageBox->host) || empty($storageBox->username) || empty($storageBox->password)) {
+            return ['added' => 0, 'updated' => 0, 'scanned_paths' => []];
+        }
+
+        $user = $storageBox->username;
+        $pass = $storageBox->password;
+        $host = parse_url('https://'.$storageBox->host, PHP_URL_HOST) ?: $storageBox->host;
+
+        $videoExtensions = ['mkv', 'mp4', 'avi', 'm4v', 'ts', 'm2ts', 'mov', 'webm', 'flv', 'wmv', 'vob', 'ogv', 'divx', '3gp', 'rmvb', 'asf', 'mpg', 'mpeg', 'm2v', 'iso'];
+        $scannedPaths = [];
+        $added = 0;
+        $updated = 0;
+
+        $directoriesToScan = [$relativePath];
+
+        while (! empty($directoriesToScan)) {
+            if ($mediaScan) {
+                $mediaScan->refresh();
+                if ($mediaScan->status === 'cancelled') {
+                    throw new \RuntimeException('Tarama kullanıcı tarafından iptal edildi.');
+                }
+            }
+
+            $currentDir = array_shift($directoriesToScan);
+            $cleanDir = trim(str_replace('\\', '/', $currentDir), '/');
+            $ftpUrl = "ftp://{$host}/".($cleanDir ? $cleanDir.'/' : '');
+
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $ftpUrl);
+            curl_setopt($ch, CURLOPT_USERPWD, "{$user}:{$pass}");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'MLSD');
+
+            $response = curl_exec($ch);
+            $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            curl_close($ch);
+
+            $lines = [];
+            if ($code == 226 && $response) {
+                $rawLines = explode("\n", str_replace("\r", '', $response));
+                foreach ($rawLines as $line) {
+                    $line = trim($line);
+                    if (! $line) {
+                        continue;
+                    }
+                    $parts = explode('; ', $line, 2);
+                    if (count($parts) === 2) {
+                        $factsStr = $parts[0];
+                        $name = $parts[1];
+                        $facts = [];
+                        foreach (explode(';', $factsStr) as $fact) {
+                            $kv = explode('=', $fact, 2);
+                            if (count($kv) === 2) {
+                                $facts[strtolower($kv[0])] = $kv[1];
+                            }
+                        }
+                        $type = $facts['type'] ?? 'file';
+                        $size = (int) ($facts['size'] ?? 0);
+                        $lines[] = ['name' => $name, 'is_dir' => in_array($type, ['dir', 'cdir', 'pdir'], true), 'size' => $size];
+                    }
+                }
+            } else {
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, $ftpUrl);
+                curl_setopt($ch, CURLOPT_USERPWD, "{$user}:{$pass}");
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+                curl_setopt($ch, CURLOPT_FTPLISTONLY, true);
+                $response = curl_exec($ch);
+                curl_close($ch);
+
+                if ($response) {
+                    $names = explode("\n", str_replace("\r", '', $response));
+                    foreach ($names as $name) {
+                        $name = trim($name);
+                        if ($name) {
+                            $isDir = ! pathinfo($name, PATHINFO_EXTENSION);
+                            $lines[] = ['name' => $name, 'is_dir' => $isDir, 'size' => 0];
+                        }
+                    }
+                }
+            }
+
+            foreach ($lines as $item) {
+                $name = $item['name'];
+                if (empty($name) || $name === '.' || $name === '..' || Str::startsWith($name, ['.', '$Recycle', '$RECYCLE', 'System Volume Information', '.Trash', '.git'])) {
+                    continue;
+                }
+
+                $itemRelativePath = $cleanDir ? "{$cleanDir}/{$name}" : $name;
+
+                if ($item['is_dir']) {
+                    if (! in_array($itemRelativePath, $directoriesToScan, true)) {
+                        $directoriesToScan[] = $itemRelativePath;
+                    }
+                } else {
+                    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+                    if (in_array($ext, $videoExtensions, true)) {
+                        $scannedPaths[] = $itemRelativePath;
+                        $sizeBytes = $item['size'];
+                        $title = pathinfo($name, PATHINFO_FILENAME);
+
+                        $type = MediaType::MOVIE;
+                        if (
+                            Str::contains($itemRelativePath, ['Diziler', 'Series', 'TV Shows', 'Sezon', 'Season'], true) ||
+                            preg_match('/S\d+E\d+/i', $name)
+                        ) {
+                            $type = MediaType::EPISODE;
+                        }
+
+                        $year = null;
+                        if (preg_match('/[\(\.\_\s](\d{4})[\)\.\_\s]/', $name, $matches)) {
+                            $candidateYear = (int) $matches[1];
+                            if ($candidateYear >= 1900 && $candidateYear <= 2099) {
+                                $year = $candidateYear;
+                            }
+                        }
+
+                        $existing = Media::where(function ($q) use ($itemRelativePath, $name) {
+                            $q->where('file_path', $itemRelativePath)
+                                ->orWhere('file_path', str_replace('/', '\\', $itemRelativePath))
+                                ->orWhere('file_name', $name);
+                        })->first();
+
+                        if (! $existing) {
+                            $cleanInfo = $this->tmdbService->cleanTitle($name);
+                            $displayTitle = $cleanInfo['title'] ?: $title;
+                            $year = $year ?: $cleanInfo['year'];
+
+                            $slug = Media::generateUniqueSlug($displayTitle, $year);
+
+                            $newMedia = Media::create([
+                                'storage_box_id' => $storageBox->id,
+                                'type' => $type,
+                                'title' => $displayTitle,
+                                'year' => $year,
+                                'slug' => $slug,
+                                'file_path' => $itemRelativePath,
+                                'file_name' => $name,
+                                'file_size' => $sizeBytes,
+                                'extension' => $ext,
+                                'mime_type' => 'video/x-matroska',
+                                'is_active' => true,
+                                'is_available' => true,
+                            ]);
+
+                            try {
+                                $this->tmdbService->fetchAndApply($newMedia);
+                            } catch (\Throwable $e) {
+                                // fallback
+                            }
+
+                            $added++;
+                        } else {
+                            if (! $existing->is_available || ($sizeBytes > 0 && $existing->file_size !== $sizeBytes)) {
+                                $existing->update([
+                                    'file_size' => $sizeBytes > 0 ? $sizeBytes : $existing->file_size,
+                                    'is_available' => true,
+                                ]);
+                                $updated++;
+                            }
+                        }
+
+                        if ($mediaScan) {
+                            $mediaScan->refresh();
+                            if ($mediaScan->scan_type !== 'all') {
+                                $calcPercent = min(95, max(5, (int) ((count($scannedPaths) / max(1, count($scannedPaths) + count($directoriesToScan) * 5)) * 100)));
+                                $mediaScan->update([
+                                    'total_scanned' => count($scannedPaths),
+                                    'added_count' => $added,
+                                    'updated_count' => $updated,
+                                    'progress_percent' => $calcPercent,
+                                    'current_target' => "{$name} taranıyor...",
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return [
+            'added' => $added,
+            'updated' => $updated,
+            'scanned_paths' => $scannedPaths,
+        ];
     }
 }
