@@ -2,6 +2,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export default function StorageBoxesIndex({ boxes, storage_summary, recent_transfers = [], active_scans = [] }) {
     const flash = usePage().props.flash;
@@ -10,6 +11,28 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
     const [addMediaModalBox, setAddMediaModalBox] = useState(null);
     const [infoModalBox, setInfoModalBox] = useState(null);
     const [activeScans, setActiveScans] = useState(active_scans || []);
+
+    const initialScan = active_scans && active_scans.length > 0 ? active_scans[0] : null;
+
+    const getBoxName = (scan) => {
+        if (!scan) return 'Storage Box';
+        if (scan.storage_box?.name) return scan.storage_box.name;
+        if (scan.scan_type === 'all') return 'Tüm Sunucular (Genel)';
+        return 'Storage Box';
+    };
+
+    const [scanProgress, setScanProgress] = useState({
+        active: !!initialScan,
+        completed: false,
+        scanId: initialScan?.id || null,
+        boxName: getBoxName(initialScan),
+        percent: Math.round(initialScan?.progress_percent || 0),
+        currentTitle: initialScan?.current_target || 'Kuyrukta bekliyor...',
+        addedCount: initialScan?.added_count || 0,
+        updatedCount: initialScan?.updated_count || 0,
+        missingCount: initialScan?.missing_count || 0,
+        scannedTotal: initialScan?.total_scanned || 0,
+    });
 
     useEffect(() => {
         let intervalId = null;
@@ -20,9 +43,38 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                 if (data.status === 'success') {
                     if (data.active_scan) {
                         setActiveScans([data.active_scan]);
-                    } else if (activeScans.length > 0) {
+                        setScanProgress({
+                            active: true,
+                            completed: false,
+                            scanId: data.active_scan.id,
+                            boxName: getBoxName(data.active_scan),
+                            percent: Math.round(data.active_scan.progress_percent || 0),
+                            currentTitle: data.active_scan.current_target || 'Taranıyor...',
+                            addedCount: data.active_scan.added_count || 0,
+                            updatedCount: data.active_scan.updated_count || 0,
+                            missingCount: data.active_scan.missing_count || 0,
+                            scannedTotal: data.active_scan.total_scanned || 0,
+                        });
+                    } else if (activeScans.length > 0 || scanProgress.active) {
                         setActiveScans([]);
-                        router.reload({ preserveScroll: true });
+                        const latest = data.latest_scan;
+                        if (latest && (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled')) {
+                            setScanProgress({
+                                active: true,
+                                completed: true,
+                                scanId: latest.id,
+                                boxName: getBoxName(latest),
+                                percent: 100,
+                                currentTitle: latest.status === 'completed'
+                                    ? 'Tarama Tamamlandı!'
+                                    : (latest.status === 'cancelled' ? 'Tarama İptal Edildi' : `Tarama Hatası: ${latest.error_message || ''}`),
+                                addedCount: latest.added_count || 0,
+                                updatedCount: latest.updated_count || 0,
+                                missingCount: latest.missing_count || 0,
+                                scannedTotal: latest.total_scanned || 0,
+                            });
+                            router.reload({ preserveScroll: true });
+                        }
                     }
                 }
             } catch (e) {
@@ -30,7 +82,7 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
             }
         };
 
-        if (activeScans.length > 0) {
+        if (activeScans.length > 0 || scanProgress.active) {
             checkScanStatus();
             intervalId = setInterval(checkScanStatus, 2500);
         }
@@ -38,7 +90,34 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
         return () => {
             if (intervalId) clearInterval(intervalId);
         };
-    }, [activeScans.length > 0]);
+    }, [activeScans.length > 0, scanProgress.active]);
+
+    const cancelScan = async () => {
+        const scanId = scanProgress.scanId || (activeScans.length > 0 ? activeScans[0].id : null);
+        if (!scanId) return;
+        try {
+            await fetch(route('admin.media.scan-cancel', { scan: scanId }), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                },
+            });
+            setScanProgress((prev) => ({
+                ...prev,
+                completed: true,
+                currentTitle: 'Tarama İptal Edildi',
+            }));
+            setActiveScans([]);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const closeScanProgress = () => {
+        setScanProgress((prev) => ({ ...prev, active: false }));
+    };
 
     // Remote Upload State
     const [remoteModalOpen, setRemoteModalOpen] = useState(false);
@@ -420,7 +499,20 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                 fetch(route('admin.media.scan-status'))
                     .then((r) => r.json())
                     .then((d) => {
-                        if (d.active_scan) setActiveScans([d.active_scan]);
+                        if (d.active_scan) {
+                            setActiveScans([d.active_scan]);
+                            setScanProgress({
+                                active: true,
+                                completed: false,
+                                scanId: d.active_scan.id,
+                                percent: Math.round(d.active_scan.progress_percent || 0),
+                                currentTitle: d.active_scan.current_target || 'Kuyrukta bekliyor...',
+                                addedCount: d.active_scan.added_count || 0,
+                                updatedCount: d.active_scan.updated_count || 0,
+                                missingCount: d.active_scan.missing_count || 0,
+                                scannedTotal: d.active_scan.total_scanned || 0,
+                            });
+                        }
                     });
             },
         });
@@ -433,7 +525,20 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                 fetch(route('admin.media.scan-status'))
                     .then((r) => r.json())
                     .then((d) => {
-                        if (d.active_scan) setActiveScans([d.active_scan]);
+                        if (d.active_scan) {
+                            setActiveScans([d.active_scan]);
+                            setScanProgress({
+                                active: true,
+                                completed: false,
+                                scanId: d.active_scan.id,
+                                percent: Math.round(d.active_scan.progress_percent || 0),
+                                currentTitle: d.active_scan.current_target || 'Kuyrukta bekliyor...',
+                                addedCount: d.active_scan.added_count || 0,
+                                updatedCount: d.active_scan.updated_count || 0,
+                                missingCount: d.active_scan.missing_count || 0,
+                                scannedTotal: d.active_scan.total_scanned || 0,
+                            });
+                        }
                     });
             },
         });
@@ -1874,6 +1979,83 @@ export default function StorageBoxesIndex({ boxes, storage_summary, recent_trans
                     </div>
                 )}
             </div>
+
+            {/* Floating Bottom-Right Media Scan Progress Overlay (Portal to document.body) */}
+            {scanProgress.active && typeof document !== 'undefined' && createPortal(
+                <div className="fixed bottom-6 right-6 md:bottom-8 md:right-8 z-[99999] w-80 md:w-96 rounded-3xl bg-[#0f1422]/95 border border-emerald-500/40 p-5 shadow-2xl backdrop-blur-xl text-xs transition-all space-y-3 animate-fadeIn">
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                        <div className="flex items-center gap-2.5 font-bold text-white text-sm">
+                            {!scanProgress.completed ? (
+                                <span className="relative flex h-3 w-3">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                                </span>
+                            ) : (
+                                <span className="text-emerald-400 text-sm">✓</span>
+                            )}
+                            <span>{scanProgress.boxName ? `${scanProgress.boxName} Taraması` : 'Storage Box Taraması'}</span>
+                        </div>
+
+                        {!scanProgress.completed ? (
+                            <button
+                                type="button"
+                                onClick={cancelScan}
+                                className="text-slate-400 hover:text-rose-400 text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-slate-800/60 hover:bg-rose-500/10 border border-slate-700/60 transition-all"
+                            >
+                                İptal Et
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={closeScanProgress}
+                                className="text-slate-400 hover:text-white text-xs font-semibold p-1 rounded-lg hover:bg-slate-800 transition-all"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Title & Progress info */}
+                    <div className="space-y-1.5">
+                        <div className="text-[11px] font-medium text-slate-400 flex justify-between items-center">
+                            <span className="truncate max-w-[220px] text-slate-200 font-mono">
+                                {scanProgress.completed
+                                    ? scanProgress.currentTitle
+                                    : `Taranıyor: ${scanProgress.currentTitle || 'Hazırlanıyor...'}`}
+                            </span>
+                            <span className="font-bold text-emerald-400 font-mono text-xs">
+                                %{scanProgress.percent}
+                            </span>
+                        </div>
+
+                        {/* Progress Track */}
+                        <div className="h-2 w-full rounded-full bg-slate-950 border border-slate-800 overflow-hidden p-0.5">
+                            <div
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                    scanProgress.completed
+                                        ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                        : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-400 animate-pulse'
+                                }`}
+                                style={{ width: `${Math.max(scanProgress.percent, 3)}%` }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Summary Numbers */}
+                    <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1">
+                        <div>
+                            Taranan: <strong className="text-white">{scanProgress.scannedTotal || 0}</strong>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px]">
+                            <span className="text-emerald-400 font-semibold" title="Yeni Eklendi">+{scanProgress.addedCount}</span>
+                            <span className="text-amber-400 font-semibold" title="Güncellendi">~{scanProgress.updatedCount}</span>
+                            <span className="text-slate-400 font-semibold" title="Erişilemedi">-{scanProgress.missingCount}</span>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
         </AuthenticatedLayout>
     );
 }

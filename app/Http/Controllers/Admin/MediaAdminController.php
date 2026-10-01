@@ -60,6 +60,10 @@ class MediaAdminController extends Controller
             });
         }
 
+        if ($request->filled('storage_box_id') && $request->storage_box_id !== 'all') {
+            $query->where('storage_box_id', $request->storage_box_id);
+        }
+
         if ($request->filled('tmdb_filter')) {
             $tmdbFilter = $request->tmdb_filter;
             if ($tmdbFilter === 'missing') {
@@ -77,7 +81,7 @@ class MediaAdminController extends Controller
             $matchedTmdbIds = $allMatching->pluck('tmdb_id')->filter()->unique()->toArray();
             $matchedSlugs = $allMatching->map(fn ($m) => Str::slug($m->title))->filter()->unique()->toArray();
 
-            $siblingMedia = Media::with('storageBox')
+            $siblingQuery = Media::with('storageBox')
                 ->where(function ($q) use ($matchedTmdbIds, $matchedSlugs) {
                     if (! empty($matchedTmdbIds)) {
                         $q->whereIn('tmdb_id', $matchedTmdbIds);
@@ -87,8 +91,13 @@ class MediaAdminController extends Controller
                             $q->orWhere('title', 'like', '%'.str_replace('-', '%', $slug).'%');
                         }
                     }
-                })
-                ->get();
+                });
+
+            if ($request->filled('storage_box_id') && $request->storage_box_id !== 'all') {
+                $siblingQuery->where('storage_box_id', $request->storage_box_id);
+            }
+
+            $siblingMedia = $siblingQuery->get();
 
             $allMatching = $allMatching->merge($siblingMedia)->unique('id');
         }
@@ -277,7 +286,7 @@ class MediaAdminController extends Controller
             'unsyncedCount' => $unsyncedCount,
             'suspiciousCount' => $suspiciousCount,
             'activeScan' => $activeScan,
-            'filters' => $request->only(['search', 'per_page', 'tmdb_filter']),
+            'filters' => $request->only(['search', 'per_page', 'tmdb_filter', 'storage_box_id']),
         ]);
     }
 

@@ -9,6 +9,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
     const [perPage, setPerPage] = useState(filters.per_page || '10');
     const [tmdbFilter, setTmdbFilter] = useState(filters.tmdb_filter || 'all');
+    const [storageBoxFilter, setStorageBoxFilter] = useState(filters.storage_box_id ? String(filters.storage_box_id) : 'all');
     const [expandedGroups, setExpandedGroups] = useState({});
 
     const toggleGroupExpand = (id) => {
@@ -24,6 +25,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
             search: searchQuery || undefined,
             per_page: perPage !== '10' ? perPage : undefined,
             tmdb_filter: tmdbFilter !== 'all' ? tmdbFilter : undefined,
+            storage_box_id: storageBoxFilter !== 'all' ? storageBoxFilter : undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -34,6 +36,7 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
             search: searchQuery || undefined,
             per_page: val !== '10' ? val : undefined,
             tmdb_filter: tmdbFilter !== 'all' ? tmdbFilter : undefined,
+            storage_box_id: storageBoxFilter !== 'all' ? storageBoxFilter : undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -43,6 +46,17 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
             search: searchQuery || undefined,
             per_page: perPage !== '10' ? perPage : undefined,
             tmdb_filter: val !== 'all' ? val : undefined,
+            storage_box_id: storageBoxFilter !== 'all' ? storageBoxFilter : undefined,
+        }, { preserveState: true, replace: true });
+    };
+
+    const handleStorageBoxFilterChange = (val) => {
+        setStorageBoxFilter(val);
+        router.get(route('admin.media.index'), {
+            search: searchQuery || undefined,
+            per_page: perPage !== '10' ? perPage : undefined,
+            tmdb_filter: tmdbFilter !== 'all' ? tmdbFilter : undefined,
+            storage_box_id: val !== 'all' ? val : undefined,
         }, { preserveState: true, replace: true });
     };
 
@@ -929,6 +943,26 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
+                            {/* Storage Box Filtre Seçeneği */}
+                            <div className="relative">
+                                <select
+                                    value={storageBoxFilter}
+                                    onChange={(e) => handleStorageBoxFilterChange(e.target.value)}
+                                    className={`bg-slate-950 border rounded-xl px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer transition-all ${
+                                        storageBoxFilter !== 'all'
+                                            ? 'border-indigo-500/60 text-indigo-300 bg-indigo-500/10'
+                                            : 'border-slate-800 text-slate-300'
+                                    }`}
+                                >
+                                    <option value="all" className="bg-slate-900 text-slate-200">Tüm Storage Box'lar</option>
+                                    {storageBoxes.map((box) => (
+                                        <option key={box.id} value={box.id} className="bg-slate-900 text-slate-200 font-semibold">
+                                            📦 {box.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
                             {/* TMDB Filtre Seçeneği */}
                             <div className="relative">
                                 <select
