@@ -10,6 +10,8 @@ export default function MediaShow({
     versionsData = [],
     totalVersionsCount = 1,
     related = [],
+    collectionMovies = [],
+    collectionTitle = null,
 }) {
     const [selectedSeason, setSelectedSeason] = useState(
         seasonsData.length > 0 ? seasonsData[0].season_number : 1
@@ -369,6 +371,109 @@ export default function MediaShow({
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* ============================================================== */}
+                {/* SERİNİN DİĞER FİLMLERİ (MOVIE COLLECTION) SECTION */}
+                {/* ============================================================== */}
+                {collectionMovies && collectionMovies.length > 0 && (
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 text-left">
+                        <div className="flex items-center gap-3">
+                            <span className="w-1.5 h-6 bg-indigo-500 rounded-full shadow-[0_0_12px_rgba(99,102,241,0.8)] inline-block" />
+                            <h2 className="font-display font-bold text-2xl text-white tracking-wide">
+                                Serinin Diğer Filmleri
+                            </h2>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                            {collectionMovies.map((movie) => {
+                                const CardContent = (
+                                    <div className="group relative flex flex-col cursor-pointer">
+                                        <div
+                                            className={`relative aspect-[2/3] w-full rounded-2xl overflow-hidden bg-slate-900 transition-all duration-300 ${
+                                                movie.is_current
+                                                    ? 'border-2 border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.5)] ring-2 ring-indigo-500/50'
+                                                    : movie.is_available
+                                                    ? 'border border-white/10 group-hover:border-indigo-500/60 group-hover:scale-[1.02] shadow-lg'
+                                                    : 'border border-white/5 opacity-40 grayscale-[30%]'
+                                            }`}
+                                        >
+                                            {movie.poster_url ? (
+                                                <img
+                                                    src={movie.poster_url}
+                                                    alt={movie.title}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center bg-slate-900 p-4 text-center">
+                                                    <span className="font-bold text-xs text-slate-400">{movie.title}</span>
+                                                </div>
+                                            )}
+
+                                            {/* Rating badges top-left */}
+                                            <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10 pointer-events-none">
+                                                {movie.vote_average > 0 && (
+                                                    <div className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-md">
+                                                        <span>★</span>
+                                                        <span>{movie.vote_average.toFixed(1)}</span>
+                                                    </div>
+                                                )}
+                                                {movie.rotten_score && (
+                                                    <div className="px-2 py-0.5 rounded bg-red-500 text-white font-black text-[10px] flex items-center gap-1 shadow-md">
+                                                        <span>🍅</span>
+                                                        <span>{movie.rotten_score}%</span>
+                                                    </div>
+                                                )}
+                                                {movie.star_score && (
+                                                    <div className="px-2 py-0.5 rounded bg-purple-600 text-white font-black text-[10px] flex items-center gap-1 shadow-md">
+                                                        <span>★</span>
+                                                        <span>{movie.star_score}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Bottom banner badge */}
+                                            {movie.is_current ? (
+                                                <div className="absolute bottom-0 inset-x-0 bg-indigo-600 text-white text-center font-bold text-xs py-1.5 shadow-md">
+                                                    Buradasınız
+                                                </div>
+                                            ) : !movie.is_available || !movie.is_released ? (
+                                                <div className="absolute bottom-0 inset-x-0 bg-black/90 backdrop-blur-md text-slate-300 text-center font-semibold text-[10px] py-1.5 border-t border-white/10">
+                                                    Henüz Yayınlanmadı
+                                                </div>
+                                            ) : null}
+                                        </div>
+
+                                        {/* Movie Title & Year below */}
+                                        <div className="mt-2.5 space-y-0.5 text-left px-0.5">
+                                            <h4
+                                                className={`font-bold text-xs line-clamp-1 transition-colors ${
+                                                    movie.is_current ? 'text-indigo-400 font-extrabold' : 'text-white group-hover:text-indigo-300'
+                                                }`}
+                                            >
+                                                {movie.title}
+                                            </h4>
+                                            {movie.year && (
+                                                <p className="text-[11px] text-slate-400 font-medium">
+                                                    {movie.year}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+
+                                if (movie.is_available && movie.local_id && !movie.is_current) {
+                                    return (
+                                        <Link key={movie.tmdb_id} href={route('media.show', movie.local_id)}>
+                                            {CardContent}
+                                        </Link>
+                                    );
+                                }
+
+                                return <div key={movie.tmdb_id}>{CardContent}</div>;
+                            })}
                         </div>
                     </div>
                 )}

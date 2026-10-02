@@ -313,6 +313,44 @@ class TmdbService
     }
 
     /**
+     * Get details for a Movie Collection.
+     */
+    public function getCollectionDetails(int|string $collectionId, string $language = 'tr-TR'): ?array
+    {
+        try {
+            $response = Http::withOptions(['verify' => false])
+                ->timeout(10)
+                ->get("{$this->baseUrl}/collection/{$collectionId}", [
+                    'api_key' => $this->apiKey,
+                    'language' => $language,
+                ]);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            if ($language !== 'en-US') {
+                $fallback = Http::withOptions(['verify' => false])
+                    ->timeout(10)
+                    ->get("{$this->baseUrl}/collection/{$collectionId}", [
+                        'api_key' => $this->apiKey,
+                        'language' => 'en-US',
+                    ]);
+
+                if ($fallback->successful()) {
+                    return $fallback->json();
+                }
+            }
+
+            return null;
+        } catch (Exception $e) {
+            Log::error('TMDB Collection Details Exception: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
      * Automatically search TMDB by title/year using Plex/Jellyfin multi-stage fallback algorithm.
      */
     public function autoMatch(string $title, ?string $type = 'movie', ?int $year = null): ?array

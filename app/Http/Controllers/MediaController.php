@@ -8,6 +8,7 @@ use App\Services\TmdbService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -311,6 +312,83 @@ class MediaController extends Controller
             ->take(6)
             ->values();
 
+        // Collection Movies ("Serinin Diğer Filmleri")
+        $collectionMovies = [];
+        $collectionTitle = null;
+
+        if ($media->tmdb_id) {
+            $tmdbService = app(TmdbService::class);
+            $movieDetails = Cache::remember(
+                "tmdb_movie_details_{$media->tmdb_id}",
+                86400,
+                fn () => $tmdbService->getMovieDetails($media->tmdb_id)
+            );
+
+            $belongsToCollection = $movieDetails['belongs_to_collection'] ?? null;
+
+            if ($belongsToCollection && ! empty($belongsToCollection['id'])) {
+                $collectionId = $belongsToCollection['id'];
+                $collectionData = Cache::remember(
+                    "tmdb_collection_{$collectionId}",
+                    86400 * 7,
+                    fn () => $tmdbService->getCollectionDetails($collectionId)
+                );
+
+                if ($collectionData && ! empty($collectionData['parts'])) {
+                    $collectionTitle = $collectionData['name'] ?? $belongsToCollection['name'] ?? 'Seri Filmleri';
+
+                    $tmdbIds = collect($collectionData['parts'])->pluck('id')->filter()->toArray();
+
+                    $localMediaMap = Media::where('is_active', true)
+                        ->where('is_available', true)
+                        ->whereIn('tmdb_id', $tmdbIds)
+                        ->get()
+                        ->groupBy('tmdb_id')
+                        ->map(fn ($group) => $group->first());
+
+                    $today = now()->toDateString();
+
+                    $collectionMovies = collect($collectionData['parts'])
+                        ->sortBy(fn ($part) => $part['release_date'] ?? '9999-99-99')
+                        ->values()
+                        ->map(function ($part) use ($localMediaMap, $media, $today) {
+                            $tmdbId = $part['id'];
+                            $localItem = $localMediaMap->get($tmdbId);
+                            $isCurrent = ($media->tmdb_id && (int) $media->tmdb_id === (int) $tmdbId)
+                                || ($localItem && (int) $localItem->id === (int) $media->id);
+
+                            $releaseDate = $part['release_date'] ?? null;
+                            $year = $releaseDate ? (int) substr($releaseDate, 0, 4) : null;
+                            $voteAverage = isset($part['vote_average']) && $part['vote_average'] > 0
+                                ? (float) round($part['vote_average'], 1)
+                                : null;
+
+                            $rottenScore = $voteAverage ? min(99, max(60, (int) round(($voteAverage * 10) + 11))) : null;
+
+                            return [
+                                'tmdb_id' => $tmdbId,
+                                'local_id' => $localItem?->id,
+                                'title' => $part['title'] ?? $part['original_title'] ?? '',
+                                'original_title' => $part['original_title'] ?? '',
+                                'year' => $year,
+                                'release_date' => $releaseDate,
+                                'poster_url' => $localItem?->poster_url ?? (! empty($part['poster_path'])
+                                    ? 'https://image.tmdb.org/t/p/w342/'.ltrim($part['poster_path'], '/')
+                                    : null),
+                                'vote_average' => $voteAverage,
+                                'rotten_score' => $rottenScore,
+                                'star_score' => $voteAverage ? 100 : null,
+                                'is_current' => $isCurrent,
+                                'is_available' => $localItem !== null,
+                                'is_released' => ! empty($releaseDate) && $releaseDate <= $today,
+                            ];
+                        })
+                        ->values()
+                        ->toArray();
+                }
+            }
+        }
+
         return Inertia::render('Media/Show', [
             'item' => $media,
             'isSeries' => $isSeries,
@@ -318,6 +396,8 @@ class MediaController extends Controller
             'versionsData' => $versionsData,
             'totalVersionsCount' => $allGroupItems->count(),
             'related' => $related,
+            'collectionMovies' => $collectionMovies,
+            'collectionTitle' => $collectionTitle,
         ]);
     }
 
