@@ -389,8 +389,10 @@ export default function MediaShow({
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
                             {collectionMovies.map((movie) => {
-                                const CardContent = (
-                                    <div className="group relative flex flex-col cursor-pointer">
+                                const isClickable = movie.is_available && movie.local_id && !movie.is_current;
+
+                                const InnerContent = (
+                                    <>
                                         <div
                                             className={`relative aspect-[2/3] w-full rounded-2xl overflow-hidden bg-slate-900 transition-all duration-300 ${
                                                 movie.is_current
@@ -412,28 +414,6 @@ export default function MediaShow({
                                                 </div>
                                             )}
 
-                                            {/* Rating badges top-left */}
-                                            <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10 pointer-events-none">
-                                                {movie.vote_average > 0 && (
-                                                    <div className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-md">
-                                                        <span>★</span>
-                                                        <span>{movie.vote_average.toFixed(1)}</span>
-                                                    </div>
-                                                )}
-                                                {movie.rotten_score && (
-                                                    <div className="px-2 py-0.5 rounded bg-red-500 text-white font-black text-[10px] flex items-center gap-1 shadow-md">
-                                                        <span>🍅</span>
-                                                        <span>{movie.rotten_score}%</span>
-                                                    </div>
-                                                )}
-                                                {movie.star_score && (
-                                                    <div className="px-2 py-0.5 rounded bg-purple-600 text-white font-black text-[10px] flex items-center gap-1 shadow-md">
-                                                        <span>★</span>
-                                                        <span>{movie.star_score}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-
                                             {/* Bottom banner badge */}
                                             {movie.is_current ? (
                                                 <div className="absolute bottom-0 inset-x-0 bg-indigo-600 text-white text-center font-bold text-xs py-1.5 shadow-md">
@@ -450,7 +430,11 @@ export default function MediaShow({
                                         <div className="mt-2.5 space-y-0.5 text-left px-0.5">
                                             <h4
                                                 className={`font-bold text-xs line-clamp-1 transition-colors ${
-                                                    movie.is_current ? 'text-indigo-400 font-extrabold' : 'text-white group-hover:text-indigo-300'
+                                                    movie.is_current
+                                                        ? 'text-indigo-400 font-extrabold'
+                                                        : isClickable
+                                                        ? 'text-white group-hover:text-indigo-300'
+                                                        : 'text-slate-400'
                                                 }`}
                                             >
                                                 {movie.title}
@@ -461,18 +445,29 @@ export default function MediaShow({
                                                 </p>
                                             )}
                                         </div>
-                                    </div>
+                                    </>
                                 );
 
-                                if (movie.is_available && movie.local_id && !movie.is_current) {
+                                if (isClickable) {
                                     return (
-                                        <Link key={movie.tmdb_id} href={route('media.show', movie.local_id)}>
-                                            {CardContent}
+                                        <Link
+                                            key={movie.tmdb_id}
+                                            href={route('media.show', movie.local_id)}
+                                            className="group relative flex flex-col cursor-pointer"
+                                        >
+                                            {InnerContent}
                                         </Link>
                                     );
                                 }
 
-                                return <div key={movie.tmdb_id}>{CardContent}</div>;
+                                return (
+                                    <div
+                                        key={movie.tmdb_id}
+                                        className={`relative flex flex-col ${movie.is_current ? 'cursor-pointer' : 'cursor-default select-none'}`}
+                                    >
+                                        {InnerContent}
+                                    </div>
+                                );
                             })}
                         </div>
                     </div>
