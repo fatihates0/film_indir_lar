@@ -662,7 +662,34 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
 
     const syncAllTmdb = () => {
         setSyncingAll(true);
+        setSyncProgress({
+            active: true,
+            completed: false,
+            current: 0,
+            total: unsyncedCount || 1,
+            percent: 10,
+            currentTitle: 'TMDB kuyruğuna gönderiliyor...',
+            successCount: 0,
+            failCount: 0,
+        });
+
         router.post(route('admin.media.tmdb-sync-all'), {}, {
+            onSuccess: (page) => {
+                setSyncProgress((prev) => ({
+                    ...prev,
+                    completed: true,
+                    percent: 100,
+                    currentTitle: page?.props?.flash?.message || 'TMDB verileri arka plan kuyruğuna (tmdb_sync) başarıyla eklendi!',
+                }));
+            },
+            onError: () => {
+                setSyncProgress((prev) => ({
+                    ...prev,
+                    completed: true,
+                    percent: 100,
+                    currentTitle: 'TMDB kuyruğuna eklenirken bir hata oluştu.',
+                }));
+            },
             onFinish: () => setSyncingAll(false),
         });
     };
