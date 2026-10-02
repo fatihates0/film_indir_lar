@@ -180,6 +180,62 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
         };
     }, [scanning, scanProgress.active, scanProgress.completed]);
 
+    useEffect(() => {
+        let intervalId = null;
+
+        const isSyncing = (syncingAll || (syncProgress.active && !syncProgress.completed));
+
+        if (!isSyncing) {
+            return;
+        }
+
+        const checkTmdbStatus = async () => {
+            try {
+                const res = await fetch(route('admin.media.tmdb-sync-status'));
+                const data = await res.json();
+                if (data.status === 'success' && data.progress) {
+                    const prog = data.progress;
+                    if (prog.status === 'running') {
+                        setSyncProgress({
+                            active: true,
+                            completed: false,
+                            current: prog.current || 0,
+                            total: prog.total || 0,
+                            percent: Math.round(prog.percent || 0),
+                            currentTitle: prog.current_title || 'Taranıyor...',
+                            successCount: prog.success_count || 0,
+                            failCount: prog.fail_count || 0,
+                        });
+                    } else if (prog.status === 'completed' || prog.status === 'cancelled') {
+                        setSyncingAll(false);
+                        setSyncProgress({
+                            active: true,
+                            completed: true,
+                            current: prog.current || prog.total || 0,
+                            total: prog.total || 0,
+                            percent: 100,
+                            currentTitle: prog.status === 'completed'
+                                ? (prog.current_title || 'Tüm TMDB Bilgileri Başarıyla Güncellendi!')
+                                : 'TMDB Senkronizasyonu İptal Edildi',
+                            successCount: prog.success_count || 0,
+                            failCount: prog.fail_count || 0,
+                        });
+                        router.reload({ preserveScroll: true });
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        };
+
+        checkTmdbStatus();
+        intervalId = setInterval(checkTmdbStatus, 2000);
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [syncingAll, syncProgress.active, syncProgress.completed]);
+
     const [selectedIds, setSelectedIds] = useState([]);
     const [selectionMode, setSelectionMode] = useState(false);
     const [deletingBulk, setDeletingBulk] = useState(false);
@@ -667,22 +723,15 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
             completed: false,
             current: 0,
             total: unsyncedCount || 1,
-            percent: 10,
+            percent: 0,
             currentTitle: 'TMDB kuyruğuna gönderiliyor...',
             successCount: 0,
             failCount: 0,
         });
 
         router.post(route('admin.media.tmdb-sync-all'), {}, {
-            onSuccess: (page) => {
-                setSyncProgress((prev) => ({
-                    ...prev,
-                    completed: true,
-                    percent: 100,
-                    currentTitle: page?.props?.flash?.message || 'TMDB verileri arka plan kuyruğuna (tmdb_sync) başarıyla eklendi!',
-                }));
-            },
             onError: () => {
+                setSyncingAll(false);
                 setSyncProgress((prev) => ({
                     ...prev,
                     completed: true,
@@ -690,12 +739,17 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
                     currentTitle: 'TMDB kuyruğuna eklenirken bir hata oluştu.',
                 }));
             },
-            onFinish: () => setSyncingAll(false),
         });
     };
 
     const cancelTmdbSync = () => {
-        syncCancelledRef.current = true;
+        fetch(route('admin.media.tmdb-sync-cancel'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+        });
     };
 
     const closeSyncProgress = () => {

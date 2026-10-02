@@ -18,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -518,6 +519,25 @@ class MediaAdminController extends Controller
         $ids = $request->input('ids');
         $mediaIds = (is_array($ids) && ! empty($ids)) ? array_map('intval', $ids) : null;
 
+        if (! empty($mediaIds)) {
+            $totalCount = count($mediaIds);
+        } else {
+            $totalCount = Media::where(function ($q) {
+                $q->whereNull('tmdb_id')->orWhere('tmdb_id', 0);
+            })->count();
+        }
+
+        Cache::put('tmdb_sync_progress', [
+            'status' => 'running',
+            'current' => 0,
+            'total' => $totalCount,
+            'percent' => 0,
+            'current_title' => 'Kuyrukta bekleniyor...',
+            'success_count' => 0,
+            'fail_count' => 0,
+            'started_at' => now()->toDateTimeString(),
+        ], 86400);
+
         TmdbSyncJob::dispatch($mediaIds);
 
         $this->auditLogService->log(
@@ -533,6 +553,31 @@ class MediaAdminController extends Controller
         }
 
         return back()->with('message', 'TMDB bilgileri çekme işlemi kuyruğa alındı ve arka planda başlatıldı.');
+    }
+
+    public function tmdbSyncStatus(): JsonResponse
+    {
+        $progress = Cache::get('tmdb_sync_progress');
+
+        return response()->json([
+            'status' => 'success',
+            'progress' => $progress,
+        ]);
+    }
+
+    public function cancelTmdbSync(): JsonResponse
+    {
+        $progress = Cache::get('tmdb_sync_progress');
+        if ($progress && ($progress['status'] ?? '') === 'running') {
+            $progress['status'] = 'cancelled';
+            $progress['current_title'] = 'Kullanıcı tarafından iptal edildi';
+            Cache::put('tmdb_sync_progress', $progress, 86400);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'TMDB senkronizasyonu iptal edildi.',
+        ]);
     }
 
     public function destroy(Media $media): RedirectResponse
