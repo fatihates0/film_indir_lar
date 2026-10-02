@@ -1316,8 +1316,8 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
                                                                                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
                                                                                                     {ver.quality_label}
                                                                                                 </span>
-                                                                                                <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_name}>
-                                                                                                    {ver.file_name}
+                                                                                                <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_path || ver.file_name}>
+                                                                                                    {ver.file_path || ver.file_name}
                                                                                                 </span>
                                                                                             </div>
 
@@ -1387,8 +1387,8 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
                                                                                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
                                                                                             {ver.quality_label}
                                                                                         </span>
-                                                                                        <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_name}>
-                                                                                            {ver.file_name}
+                                                                                        <span className="font-mono text-slate-300 truncate text-[11px]" title={ver.file_path || ver.file_name}>
+                                                                                            {ver.file_path || ver.file_name}
                                                                                         </span>
                                                                                     </div>
 
