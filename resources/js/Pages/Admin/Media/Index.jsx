@@ -661,12 +661,10 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
     };
 
     const syncAllTmdb = () => {
-        if (confirm('Tüm içerikler için TMDB bilgisi çekme işlemini arka plan kuyruğuna (tmdb_sync) göndermek istediğinize emin misiniz?')) {
-            setSyncingAll(true);
-            router.post(route('admin.media.tmdb-sync-all'), {}, {
-                onFinish: () => setSyncingAll(false),
-            });
-        }
+        setSyncingAll(true);
+        router.post(route('admin.media.tmdb-sync-all'), {}, {
+            onFinish: () => setSyncingAll(false),
+        });
     };
 
     const cancelTmdbSync = () => {

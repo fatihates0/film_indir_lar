@@ -41,10 +41,6 @@ class TmdbSyncJob implements ShouldQueue
             $mediaList = Media::where(function ($q) {
                 $q->whereNull('tmdb_id')->orWhere('tmdb_id', 0);
             })->get();
-
-            if ($mediaList->isEmpty()) {
-                $mediaList = Media::all();
-            }
         }
 
         $total = $mediaList->count();
