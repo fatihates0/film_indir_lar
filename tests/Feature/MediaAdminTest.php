@@ -1,10 +1,12 @@
 <?php
 
 use App\Enums\UserRole;
+use App\Jobs\TmdbSyncJob;
 use App\Models\Media;
 use App\Models\StorageBox;
 use App\Models\User;
 use App\Services\StorageBoxService;
+use Illuminate\Support\Facades\Queue;
 
 test('admin can delete an entire season for a TV series', function () {
     $admin = User::factory()->create(['role' => 'admin']);
@@ -63,23 +65,19 @@ test('media correctly distinguishes m1080p from 1080p Full HD', function () {
     expect($m720->quality_label)->toBe('m720p HD');
 });
 
-test('syncAllTmdb skips media that already have tmdb_id', function () {
-    $admin = User::factory()->create(['role' => 'admin']);
+test('syncAllTmdb queues TmdbSyncJob to tmdb_sync queue', function () {
+    Queue::fake();
 
-    $synced = Media::create([
-        'title' => 'Synced Movie',
-        'tmdb_id' => 12345,
-        'slug' => 'synced-movie',
-        'file_name' => 'Synced.Movie.2024.mkv',
-        'file_path' => 'Synced.Movie.2024.mkv',
-        'file_size' => 1000,
-        'is_active' => true,
-    ]);
+    $admin = User::factory()->create(['role' => 'admin']);
 
     $response = $this->actingAs($admin)->post('/admin/media/tmdb-sync-all');
     $response->assertRedirect();
     $response->assertSessionHas('message', function ($msg) {
-        return str_contains($msg, 'zaten çekilmiş durumda');
+        return str_contains($msg, 'kuyruğa alındı');
+    });
+
+    Queue::assertPushed(TmdbSyncJob::class, function ($job) {
+        return $job->queue === 'tmdb_sync';
     });
 });
 

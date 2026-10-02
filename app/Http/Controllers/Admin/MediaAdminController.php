@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\MediaType;
 use App\Http\Controllers\Controller;
 use App\Jobs\MediaScanJob;
+use App\Jobs\TmdbSyncJob;
 use App\Models\Media;
 use App\Models\MediaScan;
 use App\Models\StorageBox;
@@ -512,31 +513,26 @@ class MediaAdminController extends Controller
         ]);
     }
 
-    public function syncAllTmdb(): RedirectResponse
+    public function syncAllTmdb(Request $request): RedirectResponse|JsonResponse
     {
-        $unSyncedMedia = Media::whereNull('tmdb_id')->orWhere('tmdb_id', 0)->get();
-        $totalAlreadySynced = Media::whereNotNull('tmdb_id')->where('tmdb_id', '>', 0)->count();
+        $ids = $request->input('ids');
+        $mediaIds = (is_array($ids) && ! empty($ids)) ? array_map('intval', $ids) : null;
 
-        if ($unSyncedMedia->isEmpty()) {
-            return back()->with('message', sprintf('Tüm içeriklerin (%d medya) TMDB bilgileri zaten çekilmiş durumda.', $totalAlreadySynced));
+        TmdbSyncJob::dispatch($mediaIds);
+
+        $this->auditLogService->log(
+            action: 'media_tmdb_sync_all_queued',
+            targetType: 'Media'
+        );
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'TMDB bilgileri çekme işlemi kuyruğa alındı ve arka planda başlatıldı.',
+            ]);
         }
 
-        $count = 0;
-        $failed = 0;
-
-        foreach ($unSyncedMedia as $media) {
-            if ($this->tmdbService->fetchAndApply($media)) {
-                $count++;
-            } else {
-                $failed++;
-            }
-        }
-
-        if ($count === 0 && $failed > 0) {
-            return back()->with('error', 'Eşitlenmeyen medyalar için TMDB bilgileri çekilemedi. Lütfen geçerli bir TMDB API Anahtarı (TMDB_API_KEY) tanımlandığından emin olun.');
-        }
-
-        return back()->with('message', sprintf('%d yeni medya için TMDB bilgileri başarıyla çekildi (%d medya zaten eşleşmişti).', $count, $totalAlreadySynced));
+        return back()->with('message', 'TMDB bilgileri çekme işlemi kuyruğa alındı ve arka planda başlatıldı.');
     }
 
     public function destroy(Media $media): RedirectResponse

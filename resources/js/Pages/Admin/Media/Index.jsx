@@ -660,88 +660,12 @@ export default function MediaAdminIndex({ media, storageBoxes = [], unsyncedCoun
         });
     };
 
-    const syncAllTmdb = async () => {
-        if (syncProgress.active && !syncProgress.completed) return;
-
-        setSyncingAll(true);
-        try {
-            const allRes = await fetch(route('admin.media.all-tmdb-ids'));
-            const allData = await allRes.json();
-            const itemsToSync = allData.items || [];
-
-            if (itemsToSync.length === 0) {
-                alert('Taranacak medya bulunamadı.');
-                setSyncingAll(false);
-                return;
-            }
-
-            syncCancelledRef.current = false;
-            setSyncProgress({
-                active: true,
-                completed: false,
-                current: 0,
-                total: itemsToSync.length,
-                percent: 0,
-                currentTitle: itemsToSync[0]?.title || '',
-                successCount: 0,
-                failCount: 0,
+    const syncAllTmdb = () => {
+        if (confirm('Tüm içerikler için TMDB bilgisi çekme işlemini arka plan kuyruğuna (tmdb_sync) göndermek istediğinize emin misiniz?')) {
+            setSyncingAll(true);
+            router.post(route('admin.media.tmdb-sync-all'), {}, {
+                onFinish: () => setSyncingAll(false),
             });
-
-            let success = 0;
-            let fail = 0;
-
-            for (let i = 0; i < itemsToSync.length; i++) {
-                if (syncCancelledRef.current) break;
-
-                const item = itemsToSync[i];
-                const currentNum = i + 1;
-                const pct = Math.round((currentNum / itemsToSync.length) * 100);
-
-                setSyncProgress((prev) => ({
-                    ...prev,
-                    current: currentNum,
-                    percent: pct,
-                    currentTitle: item.title,
-                }));
-
-                try {
-                    const response = await fetch(route('admin.media.tmdb-sync', item.id), {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-                        },
-                    });
-                    const result = await response.json();
-                    if (result.success) {
-                        success++;
-                    } else {
-                        fail++;
-                    }
-                } catch (err) {
-                    fail++;
-                }
-
-                setSyncProgress((prev) => ({
-                    ...prev,
-                    successCount: success,
-                    failCount: fail,
-                }));
-            }
-
-            setSyncProgress((prev) => ({
-                ...prev,
-                completed: true,
-                currentTitle: syncCancelledRef.current ? 'İşlem İptal Edildi' : 'Tüm İşlemler Tamamlandı!',
-            }));
-
-            router.reload({ preserveScroll: true });
-        } catch (err) {
-            console.error(err);
-            alert('TMDB bilgileri alınırken bir hata oluştu.');
-        } finally {
-            setSyncingAll(false);
         }
     };
 

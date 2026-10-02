@@ -1,3 +1,6 @@
+ps aux | grep '[q]ueue:work'
+
+
 sudo -u 'fatihates.com.tr_3epsjw0viuk' /opt/plesk/php/8.4/bin/php artisan cache:clear
 sudo -u 'fatihates.com.tr_3epsjw0viuk' /opt/plesk/php/8.4/bin/php artisan schedule:clear-cache
 
