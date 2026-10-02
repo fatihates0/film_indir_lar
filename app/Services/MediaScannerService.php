@@ -6,7 +6,6 @@ use App\Enums\MediaType;
 use App\Models\Media;
 use App\Models\MediaScan;
 use App\Models\StorageBox;
-use Exception;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -409,12 +408,35 @@ class MediaScannerService
         ];
     }
 
+    protected array $mimeTypeMap = [
+        'mkv' => 'video/x-matroska',
+        'mp4' => 'video/mp4',
+        'avi' => 'video/x-msvideo',
+        'm4v' => 'video/x-m4v',
+        'ts' => 'video/mp2t',
+        'm2ts' => 'video/mp2t',
+        'mov' => 'video/quicktime',
+        'webm' => 'video/webm',
+        'flv' => 'video/x-flv',
+        'wmv' => 'video/x-ms-wmv',
+        'vob' => 'video/x-ms-vob',
+        'ogv' => 'video/ogg',
+        'divx' => 'video/x-msvideo',
+        '3gp' => 'video/3gpp',
+        'rmvb' => 'application/vnd.rn-realmedia-vbr',
+        'asf' => 'video/x-ms-asf',
+        'mpg' => 'video/mpeg',
+        'mpeg' => 'video/mpeg',
+        'm2v' => 'video/mpeg',
+        'iso' => 'application/x-iso9660-image',
+    ];
+
     /**
      * Medya dosyasını veritabanında bulur veya oluşturur.
      */
     protected function processMediaFile(?StorageBox $storageBox, string $relativePath, string $fileName, int $fileSize, string $ext): string
     {
-        $existing = $this->findExistingMedia($storageBox, $relativePath);
+        $existing = $this->findExistingMedia($storageBox, $relativePath, $fileName, $fileSize);
 
         $title = pathinfo($fileName, PATHINFO_FILENAME);
 
@@ -446,14 +468,9 @@ class MediaScannerService
 
             $slug = Media::generateUniqueSlug($displayTitle, $year);
 
-            $meta = [];
-            try {
-                $meta = $this->storageBoxService->probeMetadata($relativePath, $storageBox);
-            } catch (Exception $e) {
-                Log::info("Metadata probe skipped for {$relativePath}: ".$e->getMessage());
-            }
+            $mimeType = $this->mimeTypeMap[strtolower($ext)] ?? 'video/x-matroska';
 
-            $newMedia = Media::create([
+            Media::create([
                 'storage_box_id' => $storageBox?->id,
                 'type' => $type,
                 'title' => $displayTitle,
@@ -463,22 +480,16 @@ class MediaScannerService
                 'file_name' => $fileName,
                 'file_size' => $fileSize,
                 'extension' => $ext,
-                'mime_type' => $meta['mime_type'] ?? 'video/x-matroska',
-                'duration_seconds' => $meta['duration_seconds'] ?? null,
-                'width' => $meta['width'] ?? null,
-                'height' => $meta['height'] ?? null,
-                'video_codec' => $meta['video_codec'] ?? null,
-                'audio_codec' => $meta['audio_codec'] ?? null,
-                'bitrate' => $meta['bitrate'] ?? null,
+                'mime_type' => $mimeType,
+                'duration_seconds' => null,
+                'width' => null,
+                'height' => null,
+                'video_codec' => null,
+                'audio_codec' => null,
+                'bitrate' => null,
                 'is_active' => true,
                 'is_available' => true,
             ]);
-
-            try {
-                $this->tmdbService->fetchAndApply($newMedia);
-            } catch (\Throwable $e) {
-                Log::info("TMDB auto-fetch failed for {$newMedia->title}: ".$e->getMessage());
-            }
 
             return 'added';
         } else {
@@ -501,14 +512,22 @@ class MediaScannerService
 
     /**
      * Veritabanında belirtilen Storage Box ve bağıl yoldaki medyayı güvenli bir şekilde arar.
+     * Mükerrer kaydı önlemek için hem yol hem de dosya adı/boyut eşleştirmesi yapar.
      */
-    protected function findExistingMedia(?StorageBox $storageBox, string $relativePath): ?Media
+    protected function findExistingMedia(?StorageBox $storageBox, string $relativePath, string $fileName = '', int $fileSize = 0): ?Media
     {
+        $normPath = str_replace('\\', '/', $relativePath);
         $altPath = str_replace('/', '\\', $relativePath);
+        $trimmedPath = ltrim($normPath, '/');
+        $trimmedAlt = str_replace('/', '\\', $trimmedPath);
 
-        return Media::where(function ($q) use ($relativePath, $altPath) {
-            $q->where('file_path', $relativePath)
-                ->orWhere('file_path', $altPath);
+        // 1. Doğrudan yol eşleşmesi
+        $existing = Media::where(function ($q) use ($normPath, $altPath, $trimmedPath, $trimmedAlt) {
+            $q->where('file_path', $normPath)
+                ->orWhere('file_path', $altPath)
+                ->orWhere('file_path', $trimmedPath)
+                ->orWhere('file_path', $trimmedAlt)
+                ->orWhere('file_path', '/'.$trimmedPath);
         })->where(function ($q) use ($storageBox) {
             if ($storageBox) {
                 $q->where('storage_box_id', $storageBox->id);
@@ -516,6 +535,26 @@ class MediaScannerService
                 $q->whereNull('storage_box_id');
             }
         })->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        // 2. Taşınmış veya dizini değişmiş dosyalar için dosya adı ve boyut eşleşmesi (Mükerrer kaydı önler)
+        if ($storageBox && ! empty($fileName)) {
+            $byName = Media::where('storage_box_id', $storageBox->id)
+                ->where('file_name', $fileName)
+                ->when($fileSize > 0, function ($q) use ($fileSize) {
+                    $q->where('file_size', $fileSize);
+                })
+                ->first();
+
+            if ($byName) {
+                return $byName;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -541,7 +580,17 @@ class MediaScannerService
             });
         }
 
-        return $query->whereNotIn('file_path', $scannedPaths)->update(['is_available' => false]);
+        $normalizedScannedPaths = [];
+        foreach ($scannedPaths as $p) {
+            $norm = str_replace('\\', '/', $p);
+            $normalizedScannedPaths[] = $norm;
+            $normalizedScannedPaths[] = ltrim($norm, '/');
+            $normalizedScannedPaths[] = str_replace('/', '\\', $norm);
+            $normalizedScannedPaths[] = '\\'.str_replace('/', '\\', ltrim($norm, '/'));
+        }
+        $normalizedScannedPaths = array_values(array_unique($normalizedScannedPaths));
+
+        return $query->whereNotIn('file_path', $normalizedScannedPaths)->update(['is_available' => false]);
     }
 
     /**

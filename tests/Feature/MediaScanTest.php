@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\MediaType;
 use App\Jobs\MediaScanJob;
+use App\Models\Media;
 use App\Models\MediaScan;
 use App\Models\StorageBox;
 use App\Models\User;
@@ -151,4 +153,40 @@ test('media scanner service relative path calculation is case insensitive', func
     $service = app(MediaScannerService::class);
     $rel = $service->getRelativePath('C:/mnt/storagebox/Movies/film.mkv', 'c:/mnt/storagebox');
     expect($rel)->toBe('Movies/film.mkv');
+});
+
+test('media scanner prevents duplicate records when file path or folder changes', function () {
+    $box = StorageBox::create([
+        'name' => 'Box Dup Test',
+        'slug' => 'box-dup-test',
+        'mount_path' => storage_path('app/box_dup_test'),
+        'disk_type' => 'local',
+        'is_active' => true,
+    ]);
+
+    $existingMedia = Media::create([
+        'storage_box_id' => $box->id,
+        'type' => MediaType::MOVIE,
+        'title' => 'Sample Movie',
+        'slug' => 'sample-movie-2024',
+        'file_path' => 'OldFolder/SampleMovie.mkv',
+        'file_name' => 'SampleMovie.mkv',
+        'file_size' => 1048576,
+        'extension' => 'mkv',
+        'is_active' => true,
+        'is_available' => true,
+    ]);
+
+    $service = app(MediaScannerService::class);
+
+    // Simulate processMediaFile with new path for the same file name and size
+    $refMethod = new ReflectionMethod(MediaScannerService::class, 'processMediaFile');
+    $refMethod->setAccessible(true);
+    $res = $refMethod->invoke($service, $box, 'NewFolder/SampleMovie.mkv', 'SampleMovie.mkv', 1048576, 'mkv');
+
+    expect($res)->toBe('updated');
+    expect(Media::where('storage_box_id', $box->id)->count())->toBe(1);
+
+    $existingMedia->refresh();
+    expect($existingMedia->file_path)->toBe('NewFolder/SampleMovie.mkv');
 });
