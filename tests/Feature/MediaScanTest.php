@@ -190,3 +190,43 @@ test('media scanner prevents duplicate records when file path or folder changes'
     $existingMedia->refresh();
     expect($existingMedia->file_path)->toBe('NewFolder/SampleMovie.mkv');
 });
+
+test('media scanner deactivates old record and creates new when size mismatches', function () {
+    $box = StorageBox::create([
+        'name' => 'Box Size Mismatch Test',
+        'slug' => 'box-size-mismatch',
+        'mount_path' => storage_path('app/box_size_mismatch'),
+        'disk_type' => 'local',
+        'is_active' => true,
+    ]);
+
+    $oldMedia = Media::create([
+        'storage_box_id' => $box->id,
+        'type' => MediaType::MOVIE,
+        'title' => 'Sample Movie',
+        'slug' => 'sample-movie-2024',
+        'file_path' => 'Filmler3/SampleMovie.mkv',
+        'file_name' => 'SampleMovie.mkv',
+        'file_size' => 3000000,
+        'extension' => 'mkv',
+        'is_active' => true,
+        'is_available' => true,
+    ]);
+
+    $service = app(MediaScannerService::class);
+
+    $refMethod = new ReflectionMethod(MediaScannerService::class, 'processMediaFile');
+    $refMethod->setAccessible(true);
+    // Different file size (2000000 vs 3000000)
+    $res = $refMethod->invoke($service, $box, 'Filmler2/SampleMovie.mkv', 'SampleMovie.mkv', 2000000, 'mkv');
+
+    expect($res)->toBe('added');
+
+    $oldMedia->refresh();
+    expect($oldMedia->is_available)->toBeFalse();
+
+    $newMedia = Media::where('file_path', 'Filmler2/SampleMovie.mkv')->first();
+    expect($newMedia)->not->toBeNull();
+    expect($newMedia->is_available)->toBeTrue();
+    expect($newMedia->file_size)->toBe(2000000);
+});

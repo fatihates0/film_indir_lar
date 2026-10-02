@@ -462,6 +462,13 @@ class MediaScannerService
         }
 
         if (! $existing) {
+            // Dosya adı veya boyutu uyuşmuyorsa, o dosya adına ait eski kayıtları pasife (is_available = false) çek ve yenisini ekle
+            if (! empty($fileName)) {
+                Media::where('file_name', $fileName)
+                    ->where('is_available', true)
+                    ->update(['is_available' => false]);
+            }
+
             $cleanInfo = $this->tmdbService->cleanTitle($fileName);
             $displayTitle = $cleanInfo['title'] ?: $title;
             $year = $year ?: $cleanInfo['year'];
@@ -493,8 +500,13 @@ class MediaScannerService
 
             return 'added';
         } else {
-            $shouldUpdateSize = ($fileSize > 0 && $existing->file_size !== $fileSize);
-            if ($shouldUpdateSize || ! $existing->is_available || $existing->file_path !== $relativePath) {
+            // Dosya ismi ve boyutu birebir uyuşuyorsa dosyanın konumunu (file_path ve storage_box_id) ve durumunu güncelle
+            $shouldUpdate = ($existing->file_path !== $relativePath)
+                || ($fileSize > 0 && $existing->file_size !== $fileSize)
+                || (! $existing->is_available)
+                || ($storageBox && $existing->storage_box_id !== $storageBox->id);
+
+            if ($shouldUpdate) {
                 $existing->update([
                     'file_path' => $relativePath,
                     'file_name' => $fileName,
@@ -540,17 +552,22 @@ class MediaScannerService
             return $existing;
         }
 
-        // 2. Taşınmış veya dizini değişmiş dosyalar için dosya adı ve boyut eşleşmesi (Mükerrer kaydı önler)
-        if ($storageBox && ! empty($fileName)) {
-            $byName = Media::where('storage_box_id', $storageBox->id)
-                ->where('file_name', $fileName)
-                ->when($fileSize > 0, function ($q) use ($fileSize) {
-                    $q->where('file_size', $fileSize);
-                })
-                ->first();
+        // 2. Klasörü/konumu değişmiş dosyalar için dosya adı ve boyutu birebir eşleşme kontrolü
+        if (! empty($fileName)) {
+            $query = Media::where('file_name', $fileName);
 
-            if ($byName) {
-                return $byName;
+            if ($fileSize > 0) {
+                $query->where('file_size', $fileSize);
+            }
+
+            if ($storageBox) {
+                $query->orderByRaw('CASE WHEN storage_box_id = ? THEN 0 ELSE 1 END', [$storageBox->id]);
+            }
+
+            $byNameAndSize = $query->first();
+
+            if ($byNameAndSize) {
+                return $byNameAndSize;
             }
         }
 
