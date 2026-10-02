@@ -21,8 +21,15 @@ class FtpStorageDriver extends AbstractStorageDriver
             ];
         }
 
+        if (! \function_exists('ftp_connect')) {
+            return [
+                'success' => false,
+                'message' => 'Sunucudaki PHP yapılandırmasında FTP eklentisi (php-ftp) aktif değil. Lütfen Plesk üzerinden php-ftp uzantısını etkinleştirin.',
+            ];
+        }
+
         try {
-            $ftp = @ftp_connect($host, $port, 10);
+            $ftp = @\ftp_connect($host, $port, 10);
             if (! $ftp) {
                 return [
                     'success' => false,
@@ -30,9 +37,9 @@ class FtpStorageDriver extends AbstractStorageDriver
                 ];
             }
 
-            $login = @ftp_login($ftp, $username, $password);
+            $login = @\ftp_login($ftp, $username, $password);
             if (! $login) {
-                @ftp_close($ftp);
+                @\ftp_close($ftp);
 
                 return [
                     'success' => false,
@@ -40,9 +47,9 @@ class FtpStorageDriver extends AbstractStorageDriver
                 ];
             }
 
-            @ftp_pasv($ftp, true);
-            $rawList = @ftp_nlist($ftp, '.');
-            @ftp_close($ftp);
+            @\ftp_pasv($ftp, true);
+            $rawList = @\ftp_nlist($ftp, '.');
+            @\ftp_close($ftp);
 
             return [
                 'success' => true,
@@ -219,17 +226,21 @@ class FtpStorageDriver extends AbstractStorageDriver
 
     protected function getConnection()
     {
+        if (! \function_exists('ftp_connect')) {
+            throw new Exception('Sunucudaki PHP yapılandırmasında FTP eklentisi (php-ftp) aktif değil.');
+        }
+
         $host = $this->config['host'] ?? '';
         $username = $this->config['username'] ?? '';
         $password = $this->config['password'] ?? '';
         $port = (int) ($this->config['port'] ?? 21);
 
-        $ftp = @ftp_connect($host, $port, 15);
-        if (! $ftp || ! @ftp_login($ftp, $username, $password)) {
+        $ftp = @\ftp_connect($host, $port, 15);
+        if (! $ftp || ! @\ftp_login($ftp, $username, $password)) {
             throw new Exception("FTP Giriş Hatası ({$host}:{$port})");
         }
-        @ftp_set_option($ftp, FTP_TIMEOUT_SEC, 30);
-        @ftp_pasv($ftp, true);
+        @\ftp_set_option($ftp, FTP_TIMEOUT_SEC, 30);
+        @\ftp_pasv($ftp, true);
 
         return $ftp;
     }
