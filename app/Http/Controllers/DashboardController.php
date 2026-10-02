@@ -20,7 +20,7 @@ class DashboardController extends Controller
             ->take(10)
             ->get();
 
-        return Inertia::render('Dashboard', [
+        return Inertia::render('User', [
             'recent_downloads' => $recentDownloads,
         ]);
     }

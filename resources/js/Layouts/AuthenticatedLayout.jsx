@@ -63,14 +63,21 @@ export default function AuthenticatedLayout({ header, children }) {
                                     active={isCurrentRoute('dashboard')}
                                     className="px-3.5 py-2 rounded-xl text-sm font-medium transition-all hover:bg-white/5"
                                 >
-                                    Dashboard
+                                    Tüm İçerikler
                                 </NavLink>
                                 <NavLink
-                                    href={route('media.index')}
-                                    active={isCurrentRoute('media.*')}
+                                    href={route('movies')}
+                                    active={isCurrentRoute('movies')}
                                     className="px-3.5 py-2 rounded-xl text-sm font-medium transition-all hover:bg-white/5"
                                 >
-                                    Kütüphane
+                                    Filmler
+                                </NavLink>
+                                <NavLink
+                                    href={route('series')}
+                                    active={isCurrentRoute('series')}
+                                    className="px-3.5 py-2 rounded-xl text-sm font-medium transition-all hover:bg-white/5"
+                                >
+                                    Diziler
                                 </NavLink>
 
                                 {user.role === 'admin' && (
@@ -148,11 +155,11 @@ export default function AuthenticatedLayout({ header, children }) {
                                             </div>
                                         </div>
 
-                                        <Dropdown.Link href={route('dashboard')} className="hover:bg-white/5 rounded-xl text-slate-300 hover:text-white px-3 py-2 text-xs flex items-center gap-2">
+                                        <Dropdown.Link href={route('user')} className="hover:bg-white/5 rounded-xl text-slate-300 hover:text-white px-3 py-2 text-xs flex items-center gap-2">
                                             <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                                             </svg>
-                                            Kontrol Paneli
+                                            Kullanıcı Paneli
                                         </Dropdown.Link>
                                         <Dropdown.Link href={route('profile.edit')} className="hover:bg-white/5 rounded-xl text-slate-300 hover:text-white px-3 py-2 text-xs flex items-center gap-2">
                                             <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -205,10 +212,16 @@ export default function AuthenticatedLayout({ header, children }) {
                 {showingNavigationDropdown && (
                     <div className="md:hidden border-b border-white/10 bg-[#0c0e17]/95 px-4 pt-3 pb-6 space-y-2 animate-fade-in">
                         <ResponsiveNavLink href={route('dashboard')} active={isCurrentRoute('dashboard')}>
-                            Dashboard
+                            Tüm İçerikler
                         </ResponsiveNavLink>
-                        <ResponsiveNavLink href={route('media.index')} active={isCurrentRoute('media.*')}>
-                            Film & Dizi Kütüphanesi
+                        <ResponsiveNavLink href={route('movies')} active={isCurrentRoute('movies')}>
+                            Filmler
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink href={route('series')} active={isCurrentRoute('series')}>
+                            Diziler
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink href={route('user')} active={isCurrentRoute('user')}>
+                            Kullanıcı Paneli
                         </ResponsiveNavLink>
                         
                         {user.role === 'admin' && (

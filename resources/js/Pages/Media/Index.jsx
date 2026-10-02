@@ -42,12 +42,21 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
 
     const activeFeatured = featuredItems[activeSlide] || featuredItems[0];
 
+    const currentRouteName = (() => {
+        try {
+            return route().current();
+        } catch (e) {
+            return 'dashboard';
+        }
+    })();
+    const targetRoute = (currentRouteName && ['movies', 'series', 'dashboard'].includes(currentRouteName)) ? currentRouteName : 'dashboard';
+
     const handleSearch = (e) => {
         if (e && typeof e.preventDefault === 'function') {
             e.preventDefault();
         }
         router.get(
-            route('media.index'),
+            route(targetRoute),
             { search, type, genre, sort: sortBy },
             { preserveState: true, replace: true }
         );
@@ -55,9 +64,13 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
 
     const handleTypeChange = (newType) => {
         setType(newType);
+        let destRoute = 'dashboard';
+        if (newType === 'movie') destRoute = 'movies';
+        else if (newType === 'series') destRoute = 'series';
+
         router.get(
-            route('media.index'),
-            { search, type: newType, genre, sort: sortBy },
+            route(destRoute),
+            { search, genre, sort: sortBy },
             { preserveState: true, replace: true }
         );
     };
@@ -65,7 +78,7 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
     const handleGenreChange = (newGenre) => {
         setGenre(newGenre);
         router.get(
-            route('media.index'),
+            route(targetRoute),
             { search, type, genre: newGenre, sort: sortBy },
             { preserveState: true, replace: true }
         );
@@ -106,18 +119,39 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const isMoviesOnly = targetRoute === 'movies' || type === 'movie';
+    const isSeriesOnly = targetRoute === 'series' || type === 'series';
+
+    const pageTitle = isMoviesOnly
+        ? 'Filmler - CINEBOX'
+        : isSeriesOnly
+            ? 'Diziler - CINEBOX'
+            : 'Film & Dizi Kütüphanesi - CINEBOX';
+
+    const headerTitle = isMoviesOnly
+        ? 'Film Kütüphanesi'
+        : isSeriesOnly
+            ? 'Dizi Kütüphanesi'
+            : 'Film & Dizi Kütüphanesi';
+
+    const headerSubtitle = isMoviesOnly
+        ? '4K Ultra HD ve Dual ses seçeneğiyle yüksek hızlı film arşivi.'
+        : isSeriesOnly
+            ? 'Tüm sezon ve bölümleriyle yüksek hızlı dizi arşivi.'
+            : '4K Ultra HD ve Dual ses seçeneğiyle yüksek hızlı indirme kataloğu.';
+
     return (
         <AuthenticatedLayout
             header={
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
                         <h1 className="font-display font-black text-3xl text-white tracking-tight flex items-center gap-3">
-                            <span>Film & Dizi Kütüphanesi</span>
+                            <span>{headerTitle}</span>
                             <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                                 {rawMedia.total || mediaList.length || 0} İçerik Mevcut
                             </span>
                         </h1>
-                        <p className="text-xs text-slate-400 mt-1">4K Ultra HD ve Dual ses seçeneğiyle yüksek hızlı indirme kataloğu.</p>
+                        <p className="text-xs text-slate-400 mt-1">{headerSubtitle}</p>
                     </div>
 
                     <div className="flex items-center gap-3 glass-panel px-4 py-2.5 rounded-2xl border border-white/10 text-xs">
@@ -132,7 +166,7 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
                 </div>
             }
         >
-            <Head title="Film & Dizi Kütüphanesi - CINEBOX" />
+            <Head title={pageTitle} />
 
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8">
                 {/* Error Banner */}
@@ -305,7 +339,7 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
                                 value={sortBy}
                                 onChange={(e) => {
                                     setSortBy(e.target.value);
-                                    router.get(route('media.index'), { search, type, genre, sort: e.target.value }, { preserveState: true, replace: true });
+                                    router.get(route(targetRoute), { search, type, genre, sort: e.target.value }, { preserveState: true, replace: true });
                                 }}
                                 className="py-2.5 px-3 rounded-xl glass-input text-xs text-white bg-slate-900 border border-white/10"
                             >
@@ -468,7 +502,7 @@ export default function MediaIndex({ media, allGenres = [], filters = {} }) {
                             Arama kriterlerinize uygun içerik bulunamadı. Lütfen arama terimini değiştirin veya filtreleri temizleyin.
                         </p>
                         <button
-                            onClick={() => { setSearch(''); setType(''); setGenre(''); router.get(route('media.index')); }}
+                            onClick={() => { setSearch(''); setType(''); setGenre(''); router.get(route(targetRoute)); }}
                             className="px-4 py-2 rounded-xl gradient-button text-white text-xs font-bold"
                         >
                             Filtreleri Sıfırla

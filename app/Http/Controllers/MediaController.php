@@ -183,6 +183,20 @@ class MediaController extends Controller
         ]);
     }
 
+    public function movies(Request $request): Response
+    {
+        $request->merge(['type' => 'movie']);
+
+        return $this->index($request);
+    }
+
+    public function series(Request $request): Response
+    {
+        $request->merge(['type' => 'series']);
+
+        return $this->index($request);
+    }
+
     public function show(Media $media, Request $request): Response
     {
         if (empty($media->cast) && $media->tmdb_id) {

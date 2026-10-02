@@ -38,7 +38,10 @@ Route::post('/webhooks/plex', [PlexWebhookController::class, 'handle'])
 
 // Authenticated User Routes
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/user', [DashboardController::class, 'index'])->name('user');
+    Route::get('/dashboard', [MediaController::class, 'index'])->name('dashboard');
+    Route::get('/movies', [MediaController::class, 'movies'])->name('movies');
+    Route::get('/series', [MediaController::class, 'series'])->name('series');
 
     Route::get('/media', [MediaController::class, 'index'])->name('media.index');
     Route::get('/media/actor/{name}', [MediaController::class, 'actorMedia'])->name('media.actor');
